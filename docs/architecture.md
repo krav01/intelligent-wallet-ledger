@@ -23,6 +23,12 @@ The ledger stores immutable journal entries and postings. Money is represented i
 minor units with an explicit currency. A journal entry may be posted only when its
 postings sum to zero independently for every currency.
 
+The ledger domain owns immutable `Currency` and `Money` value objects. Currency
+codes use strict three-letter uppercase ASCII representation; the application layer
+may further restrict the product's supported currencies. Signed `int64` minor units
+support debit and credit postings. Arithmetic rejects invalid values, mixed
+currencies, and integer overflow.
+
 `account_balances` is a transactional read model, not an independent source of truth.
 Posting a transaction locks affected accounts in stable order and atomically writes
 the journal entry, postings, balance snapshots, and outbox events. Corrections append

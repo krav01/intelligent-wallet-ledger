@@ -70,9 +70,10 @@ See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and
 
 ## Current status
 
-Foundation in progress: process lifecycle, operational HTTP endpoints, development
-tooling, CI, local infrastructure, and architecture documentation. Financial domain
-logic has not been implemented yet.
+Roadmap slices 1 and 2 are implemented: repository foundation plus immutable
+`Currency` and `Money` value objects. Money arithmetic uses signed `int64` minor
+units, rejects mixed currencies and invalid zero values, and reports overflow instead
+of wrapping. The invariants are covered by unit, property, and fuzz-seed tests.
 
 ## Development
 
