@@ -43,7 +43,7 @@ A transfer is an immutable requester-scoped intent with a bounded idempotency ke
 positive amount, and distinct source and destination accounts. Its server-assigned
 transfer ID is also the journal entry ID, and it always maps to a source debit followed
 by an equal destination credit. PostgreSQL idempotency and authorization semantics
-remain proposed in ADR-0006 until the persistence sub-slice is reviewed.
+are defined by ADR-0006 for the persistence sub-slice.
 
 ## Asynchronous delivery
 

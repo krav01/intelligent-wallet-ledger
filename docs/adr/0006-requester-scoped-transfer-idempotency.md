@@ -1,6 +1,6 @@
 # ADR-0006: Requester-scoped transfer idempotency
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-10
 
 ## Context
@@ -10,7 +10,7 @@ outside the ledger transaction can race and apply the same intent twice. The key
 needs a namespace so unrelated callers cannot collide globally, and a replay with
 different financial intent must not silently return an unrelated result.
 
-## Proposed decision
+## Decision
 
 Scope each idempotency key by the authenticated requester. Normalize it by trimming
 edge whitespace, then require 1 to 128 visible ASCII bytes and preserve its remaining
