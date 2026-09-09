@@ -38,8 +38,16 @@ make run
 To start the API together with PostgreSQL, Kafka, and Redis:
 
 ```bash
-docker compose up --build
+docker compose up -d --build
+make migrate-up
 curl http://localhost:8080/readyz
+```
+
+Run the PostgreSQL adapter tests against the migrated local database:
+
+```bash
+TEST_DATABASE_URL='postgres://wallet:wallet_dev_only@localhost:5432/wallet?sslmode=disable' \
+  make test-integration
 ```
 
 ## Architecture
@@ -70,10 +78,11 @@ See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and
 
 ## Current status
 
-Roadmap slices 1 and 2 are implemented: repository foundation plus immutable
-`Currency` and `Money` value objects. Money arithmetic uses signed `int64` minor
-units, rejects mixed currencies and invalid zero values, and reports overflow instead
-of wrapping. The invariants are covered by unit, property, and fuzz-seed tests.
+Roadmap slices 1 through 3 are implemented: repository foundation, immutable money
+value objects, and PostgreSQL-backed wallets with one account per currency. Wallet,
+account, and zero-balance snapshot creation is atomic; database constraints reject
+currency mismatches and negative customer balances. Unit and tagged integration tests
+cover the domain and persistence boundaries.
 
 ## Development
 
@@ -81,6 +90,7 @@ of wrapping. The invariants are covered by unit, property, and fuzz-seed tests.
 make fmt
 make vet
 make test-race
+make test-integration
 make lint
 make vuln
 make build

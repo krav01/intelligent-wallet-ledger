@@ -1,7 +1,7 @@
 BINARY := bin/wallet-api
 GO ?= go
 
-.PHONY: build clean fmt help lint run test test-race vet vuln
+.PHONY: build clean fmt help migrate-down migrate-up run test test-integration test-race vet vuln
 
 ## build: Build the wallet API.
 build:
@@ -19,6 +19,14 @@ fmt:
 lint:
 	golangci-lint run ./...
 
+## migrate-up: Apply all PostgreSQL migrations through Docker Compose.
+migrate-up:
+	docker compose run --rm migrate
+
+## migrate-down: Revert the latest PostgreSQL migration through Docker Compose.
+migrate-down:
+	docker compose run --rm migrate -path=/migrations -database="postgres://wallet:wallet_dev_only@postgres:5432/wallet?sslmode=disable" down 1
+
 ## run: Run the wallet API.
 run:
 	$(GO) run ./cmd/wallet-api
@@ -26,6 +34,10 @@ run:
 ## test: Run deterministic unit tests.
 test:
 	$(GO) test -shuffle=on -cover ./...
+
+## test-integration: Run tests that require TEST_DATABASE_URL and migrated PostgreSQL.
+test-integration:
+	$(GO) test -tags=integration -shuffle=on ./...
 
 ## test-race: Run unit tests with the race detector.
 test-race:

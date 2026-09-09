@@ -30,3 +30,37 @@ jobs:
           git diff --exit-code -- go.mod go.sum
       - run: go build ./...
       - run: go test -race -shuffle=on -coverprofile=coverage.out ./...
+
+  integration:
+    name: PostgreSQL integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.6-alpine3.23
+        env:
+          POSTGRES_DB: wallet_test
+          POSTGRES_USER: wallet
+          POSTGRES_PASSWORD: wallet_test_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wallet -d wallet_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgres://wallet:wallet_test_only@localhost:5432/wallet_test?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install migration tool
+        run: go install -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1
+      - name: Apply migrations
+        run: migrate -path migrations -database "$TEST_DATABASE_URL" up
+      - name: Test PostgreSQL adapter
+        run: go test -race -tags=integration -shuffle=on ./internal/wallet/...
