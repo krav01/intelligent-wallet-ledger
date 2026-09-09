@@ -63,4 +63,8 @@ jobs:
       - name: Apply migrations
         run: migrate -path migrations -database "$TEST_DATABASE_URL" up
       - name: Test PostgreSQL adapter
-        run: go test -race -tags=integration -shuffle=on ./internal/wallet/...
+        run: go test -race -tags=integration -shuffle=on ./internal/wallet/... ./internal/ledger/...
+      - name: Validate reversible ledger migration
+        run: |
+          migrate -path migrations -database "$TEST_DATABASE_URL" down 1
+          migrate -path migrations -database "$TEST_DATABASE_URL" up 1

@@ -34,6 +34,11 @@ Posting a transaction locks affected accounts in stable order and atomically wri
 the journal entry, postings, balance snapshots, and outbox events. Corrections append
 reversal entries instead of mutating posted history.
 
+Wallets contain nonnegative customer accounts. Controlled system accounts provide the
+clearing side and may hold negative balances. Ledger posting aggregates repeated
+postings per account, locks distinct snapshots in canonical UUID order, and increments
+each participating snapshot version once within a serializable transaction.
+
 ## Asynchronous delivery
 
 Database state and outbox events are committed in one PostgreSQL transaction. Kafka

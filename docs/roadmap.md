@@ -7,9 +7,9 @@ is small and coherent.
 1. [x] Repository foundation: process lifecycle, docs, CI, Docker Compose, health checks.
 2. [x] Money and currency value objects with property and fuzz tests.
 3. [x] Wallets, accounts, PostgreSQL migrations, and transactional balance snapshots.
-4. Immutable ledger with balanced postings and reversal entries.
+4. [x] Immutable ledger with balanced postings and reversal entries.
    - [x] Pure domain model with exact per-currency balancing and reversals.
-   - [ ] PostgreSQL persistence, constraints, and atomic balance updates.
+   - [x] PostgreSQL persistence, constraints, and atomic balance updates.
 5. Transfers, idempotency keys, stable account locking, and concurrency tests.
 6. Transactional outbox, Kafka publisher, event envelopes, and consumer inboxes.
 7. Asynchronous transfer lifecycle and deterministic risk engine.
