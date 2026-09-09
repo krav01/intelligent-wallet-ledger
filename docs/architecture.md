@@ -39,6 +39,12 @@ clearing side and may hold negative balances. Ledger posting aggregates repeated
 postings per account, locks distinct snapshots in canonical UUID order, and increments
 each participating snapshot version once within a serializable transaction.
 
+A transfer is an immutable requester-scoped intent with a bounded idempotency key, a
+positive amount, and distinct source and destination accounts. Its server-assigned
+transfer ID is also the journal entry ID, and it always maps to a source debit followed
+by an equal destination credit. PostgreSQL idempotency and authorization semantics
+remain proposed in ADR-0006 until the persistence sub-slice is reviewed.
+
 ## Asynchronous delivery
 
 Database state and outbox events are committed in one PostgreSQL transaction. Kafka
