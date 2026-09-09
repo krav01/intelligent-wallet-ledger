@@ -79,10 +79,11 @@ See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and
 ## Current status
 
 Roadmap slices 1 through 3 are implemented: repository foundation, immutable money
-value objects, and PostgreSQL-backed wallets with one account per currency. Wallet,
-account, and zero-balance snapshot creation is atomic; database constraints reject
-currency mismatches and negative customer balances. Unit and tagged integration tests
-cover the domain and persistence boundaries.
+value objects, and PostgreSQL-backed wallets with one account per currency. The first
+part of slice 4 adds immutable journal entries, exact per-currency balancing, and
+append-only reversal entries. PostgreSQL ledger persistence and atomic balance updates
+remain pending. Unit and tagged integration tests cover the implemented domain and
+persistence boundaries.
 
 ## Development
 
