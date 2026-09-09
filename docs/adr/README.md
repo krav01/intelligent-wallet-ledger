@@ -8,3 +8,4 @@ history.
 - [ADR-0002: Deterministic money path and advisory AI](0002-deterministic-money-path.md)
 - [ADR-0003: Wallet, account, and balance snapshot schema](0003-wallet-account-balance-schema.md)
 - [ADR-0004: Balanced immutable ledger domain](0004-balanced-ledger-domain.md)
+- [ADR-0005: Transactional ledger persistence and account types](0005-transactional-ledger-persistence.md)
