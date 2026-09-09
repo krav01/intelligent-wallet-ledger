@@ -1,4 +1,17 @@
 services:
+  migrate:
+    image: migrate/migrate:v4.19.1
+    profiles: ["tools"]
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://wallet:wallet_dev_only@postgres:5432/wallet?sslmode=disable"
+      - "up"
+    volumes:
+      - ./migrations:/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   wallet-api:
     build: .
     environment:
