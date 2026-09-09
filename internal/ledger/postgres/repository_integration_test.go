@@ -50,7 +50,7 @@ func TestRepositoryPostGetAndReverse(t *testing.T) {
 		mustPosting(t, customerAccount, 50, "USD"),
 	})
 	fakeReversalID := fixture.newUUID(t)
-	fakeReversal, err := fakeSource.Reverse(fakeReversalID, time.Now())
+	fakeReversal, err := fakeSource.Reverse(fakeReversalID, databaseTime())
 	if err != nil {
 		t.Fatalf("JournalEntry.Reverse() error = %v", err)
 	}
@@ -60,7 +60,7 @@ func TestRepositoryPostGetAndReverse(t *testing.T) {
 	}
 
 	reversalID := fixture.newUUID(t)
-	reversal, err := entry.Reverse(reversalID, time.Now())
+	reversal, err := entry.Reverse(reversalID, databaseTime())
 	if err != nil {
 		t.Fatalf("JournalEntry.Reverse() error = %v", err)
 	}
@@ -78,7 +78,7 @@ func TestRepositoryPostGetAndReverse(t *testing.T) {
 	assertEntryEqual(t, gotReversal, reversal)
 
 	secondReversalID := fixture.newUUID(t)
-	secondReversal, err := entry.Reverse(secondReversalID, time.Now())
+	secondReversal, err := entry.Reverse(secondReversalID, databaseTime())
 	if err != nil {
 		t.Fatalf("JournalEntry.Reverse() error = %v", err)
 	}
@@ -576,13 +576,17 @@ func mustEntry(t testing.TB, id string, postings []domain.Posting) domain.Journa
 	entry, err := domain.NewJournalEntry(domain.NewJournalEntryParams{
 		ID:         id,
 		Postings:   postings,
-		RecordedAt: time.Now(),
+		RecordedAt: databaseTime(),
 	})
 	if err != nil {
 		t.Fatalf("NewJournalEntry() error = %v", err)
 	}
 
 	return entry
+}
+
+func databaseTime() time.Time {
+	return time.Now().UTC().Truncate(time.Microsecond)
 }
 
 func mustPosting(
