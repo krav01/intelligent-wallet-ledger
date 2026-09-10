@@ -10,9 +10,12 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/krav01/intelligent-wallet-ledger/internal/event"
 	ledgerdomain "github.com/krav01/intelligent-wallet-ledger/internal/ledger/domain"
 	ledgerpostgres "github.com/krav01/intelligent-wallet-ledger/internal/ledger/postgres"
+	outboxpostgres "github.com/krav01/intelligent-wallet-ledger/internal/outbox/postgres"
 	transferdomain "github.com/krav01/intelligent-wallet-ledger/internal/transfer/domain"
+	transferevents "github.com/krav01/intelligent-wallet-ledger/internal/transfer/events"
 )
 
 const maxTransactionAttempts = 3
@@ -134,12 +137,13 @@ func (r *Repository) Create(
 }
 
 type preparedTransfer struct {
-	transfer      transferdomain.Transfer
-	id            pgtype.UUID
-	requesterID   pgtype.UUID
-	sourceID      pgtype.UUID
-	destinationID pgtype.UUID
-	entry         ledgerdomain.JournalEntry
+	transfer       transferdomain.Transfer
+	id             pgtype.UUID
+	requesterID    pgtype.UUID
+	sourceID       pgtype.UUID
+	destinationID  pgtype.UUID
+	entry          ledgerdomain.JournalEntry
+	completedEvent event.Draft
 }
 
 type accountRecord struct {
@@ -185,13 +189,19 @@ func prepareTransfer(transfer transferdomain.Transfer) (preparedTransfer, error)
 		return preparedTransfer{}, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
 	}
 
+	completedEvent, err := transferevents.Completed(validated)
+	if err != nil {
+		return preparedTransfer{}, fmt.Errorf("%w: completed event: %w", ErrInvalidArgument, err)
+	}
+
 	return preparedTransfer{
-		transfer:      validated,
-		id:            id,
-		requesterID:   requesterID,
-		sourceID:      sourceID,
-		destinationID: destinationID,
-		entry:         entry,
+		transfer:       validated,
+		id:             id,
+		requesterID:    requesterID,
+		sourceID:       sourceID,
+		destinationID:  destinationID,
+		entry:          entry,
+		completedEvent: completedEvent,
 	}, nil
 }
 
@@ -229,6 +239,9 @@ func (r *Repository) createOnce(
 	}
 	if err := ledgerpostgres.PostTx(ctx, tx, prepared.entry); err != nil {
 		return transferdomain.Transfer{}, mapLedgerError(err)
+	}
+	if _, err := outboxpostgres.AddTx(ctx, tx, prepared.completedEvent); err != nil {
+		return transferdomain.Transfer{}, fmt.Errorf("storing completed transfer event: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return transferdomain.Transfer{}, fmt.Errorf("committing transfer transaction: %w", err)

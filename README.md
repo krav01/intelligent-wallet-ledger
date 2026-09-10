@@ -78,15 +78,19 @@ See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and
 
 ## Current status
 
-Roadmap slices 1 through 5 are implemented: repository foundation, immutable money
+Roadmap slices 1 through 5 are implemented, together with the PostgreSQL foundation
+of slice 6: repository foundation, immutable money
 value objects, PostgreSQL-backed wallets, the transactional double-entry ledger, and
 requester-scoped idempotent customer transfers.
 Ledger posting locks accounts in stable order and atomically stores entries, postings,
-balance snapshots, and transfer metadata. Successful transfer retries return the
-original result without another balance effect, while changed intent conflicts.
+balance snapshots, transfer metadata, and a versioned `transfer.completed` outbox event.
+Successful transfer retries return the original result without another balance effect
+or event, while changed intent conflicts.
 Customer accounts remain nonnegative; controlled system accounts provide the
 settlement side. Unit and tagged integration tests cover domain, persistence,
-atomicity, replay, authorization, reversal, overflow, and concurrency boundaries.
+atomicity, replay, authorization, reversal, overflow, outbox leasing/fencing,
+consumer deduplication, and concurrency boundaries. Kafka publication remains the
+next slice 6 increment.
 
 ## Development
 
