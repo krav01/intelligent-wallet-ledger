@@ -4,6 +4,7 @@ package postgres_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"sync"
@@ -13,7 +14,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	ledgerdomain "github.com/krav01/intelligent-wallet-ledger/internal/ledger/domain"
 	ledgerpostgres "github.com/krav01/intelligent-wallet-ledger/internal/ledger/postgres"
+	outboxpostgres "github.com/krav01/intelligent-wallet-ledger/internal/outbox/postgres"
 	transferdomain "github.com/krav01/intelligent-wallet-ledger/internal/transfer/domain"
+	transferevents "github.com/krav01/intelligent-wallet-ledger/internal/transfer/events"
 	transferpostgres "github.com/krav01/intelligent-wallet-ledger/internal/transfer/postgres"
 )
 
@@ -31,6 +34,7 @@ func TestRepositoryCreateReplayAndConflict(t *testing.T) {
 		t.Fatalf("Repository.Create() error = %v", err)
 	}
 	assertTransferEqual(t, created, original)
+	fixture.assertCompletedEvent(t, original)
 
 	replay := fixture.transfer(t, ownerID, sourceID, destinationID, "request-1", 60)
 	replayed, err := repository.Create(t.Context(), replay)
@@ -41,6 +45,7 @@ func TestRepositoryCreateReplayAndConflict(t *testing.T) {
 	fixture.assertBalance(t, sourceID, 40, 2)
 	fixture.assertBalance(t, destinationID, 60, 1)
 	fixture.assertTransferCount(t, ownerID, "request-1", 1)
+	fixture.assertOutboxEventCount(t, original.ID(), 1)
 	if _, err := fixture.pool.Exec(
 		t.Context(),
 		`UPDATE accounts SET status = 'frozen' WHERE id = $1`,
@@ -60,6 +65,7 @@ func TestRepositoryCreateReplayAndConflict(t *testing.T) {
 	}
 	fixture.assertBalance(t, sourceID, 40, 2)
 	fixture.assertBalance(t, destinationID, 60, 1)
+	fixture.assertOutboxEventCount(t, original.ID(), 1)
 }
 
 func TestRepositoryFailureDoesNotReserveKey(t *testing.T) {
@@ -74,6 +80,7 @@ func TestRepositoryFailureDoesNotReserveKey(t *testing.T) {
 		t.Fatalf("Repository.Create(unfunded) error = %v, want ErrInsufficientFunds", err)
 	}
 	fixture.assertTransferCount(t, ownerID, "retryable-failure", 0)
+	fixture.assertOutboxEventCount(t, request.ID(), 0)
 
 	fixture.fund(t, sourceID, 25)
 	created, err := repository.Create(t.Context(), request)
@@ -83,6 +90,46 @@ func TestRepositoryFailureDoesNotReserveKey(t *testing.T) {
 	assertTransferEqual(t, created, request)
 	fixture.assertBalance(t, sourceID, 0, 2)
 	fixture.assertBalance(t, destinationID, 25, 1)
+	fixture.assertOutboxEventCount(t, request.ID(), 1)
+}
+
+func TestRepositoryOutboxFailureRollsBackTransferAndLedger(t *testing.T) {
+	fixture := newFixture(t)
+	repository := mustRepository(t, fixture.pool)
+	ownerID := fixture.newUUID(t)
+	sourceID := fixture.createAccount(t, ownerID, "USD", "customer", "active")
+	destinationID := fixture.createAccount(t, fixture.newUUID(t), "USD", "customer", "active")
+	fixture.fund(t, sourceID, 100)
+
+	request := fixture.transfer(t, ownerID, sourceID, destinationID, "outbox-conflict", 30)
+	draft, err := transferevents.Completed(request)
+	if err != nil {
+		t.Fatalf("events.Completed() error = %v", err)
+	}
+	tx, err := fixture.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	envelope, err := outboxpostgres.AddTx(t.Context(), tx, draft)
+	if err != nil {
+		if rollbackErr := tx.Rollback(t.Context()); rollbackErr != nil {
+			t.Errorf("Rollback() after AddTx error = %v", rollbackErr)
+		}
+		t.Fatalf("AddTx() error = %v", err)
+	}
+	fixture.eventIDs = append(fixture.eventIDs, envelope.EventID())
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+
+	if _, err := repository.Create(t.Context(), request); !errors.Is(err, outboxpostgres.ErrAlreadyExists) {
+		t.Fatalf("Repository.Create() error = %v, want ErrAlreadyExists", err)
+	}
+	fixture.assertTransferCount(t, ownerID, "outbox-conflict", 0)
+	fixture.assertBalance(t, sourceID, 100, 1)
+	fixture.assertBalance(t, destinationID, 0, 0)
+	fixture.assertJournalEntryCount(t, request.ID(), 0)
+	fixture.assertOutboxEventCount(t, request.ID(), 1)
 }
 
 func TestRepositoryEnforcesAuthorizationAndAccountPolicy(t *testing.T) {
@@ -169,6 +216,7 @@ func TestRepositoryConcurrentReplayHasOneEffect(t *testing.T) {
 	fixture.assertTransferCount(t, ownerID, "concurrent", 1)
 	fixture.assertBalance(t, sourceID, 75, 2)
 	fixture.assertBalance(t, destinationID, 25, 1)
+	fixture.assertOutboxEventCount(t, winner.ID(), 1)
 }
 
 func TestRepositoryConcurrentDifferentKeysCannotOverdraw(t *testing.T) {
@@ -221,6 +269,7 @@ type fixture struct {
 	pool       *pgxpool.Pool
 	walletIDs  []string
 	accountIDs []string
+	eventIDs   []string
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -372,9 +421,112 @@ func (f *fixture) assertTransferCount(t testing.TB, requesterID, key string, wan
 	}
 }
 
+func (f *fixture) assertOutboxEventCount(t testing.TB, transferID string, want int) {
+	t.Helper()
+	var got int
+	if err := f.pool.QueryRow(
+		context.Background(),
+		`SELECT count(*) FROM outbox_events WHERE aggregate_type = 'transfer' AND aggregate_id = $1`,
+		transferID,
+	).Scan(&got); err != nil {
+		t.Fatalf("counting transfer outbox events: %v", err)
+	}
+	if got != want {
+		t.Errorf("transfer outbox event count = %d, want %d", got, want)
+	}
+}
+
+func (f *fixture) assertCompletedEvent(t testing.TB, transfer transferdomain.Transfer) {
+	t.Helper()
+	var eventType, aggregateType, aggregateID, correlationID string
+	var eventVersion int16
+	var aggregateVersion int64
+	var occurredAt time.Time
+	var payload []byte
+	if err := f.pool.QueryRow(
+		context.Background(),
+		`SELECT event_type, event_version, aggregate_type, aggregate_id::text,
+                aggregate_version, correlation_id::text, occurred_at, payload
+         FROM outbox_events
+         WHERE aggregate_type = 'transfer' AND aggregate_id = $1`,
+		transfer.ID(),
+	).Scan(
+		&eventType,
+		&eventVersion,
+		&aggregateType,
+		&aggregateID,
+		&aggregateVersion,
+		&correlationID,
+		&occurredAt,
+		&payload,
+	); err != nil {
+		t.Fatalf("selecting completed transfer event: %v", err)
+	}
+	if eventType != transferevents.CompletedType || eventVersion != transferevents.CompletedVersion ||
+		aggregateType != "transfer" || aggregateID != transfer.ID() || aggregateVersion != 1 ||
+		correlationID != transfer.ID() || !occurredAt.Equal(transfer.RequestedAt()) {
+		t.Errorf("completed event metadata does not match transfer")
+	}
+	var got struct {
+		TransferID           string `json:"transfer_id"`
+		RequesterID          string `json:"requester_id"`
+		SourceAccountID      string `json:"source_account_id"`
+		DestinationAccountID string `json:"destination_account_id"`
+		Currency             string `json:"currency"`
+		AmountMinor          int64  `json:"amount_minor"`
+		RequestedAt          string `json:"requested_at"`
+	}
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("decoding completed transfer payload: %v", err)
+	}
+	if got.TransferID != transfer.ID() || got.RequesterID != transfer.RequesterID() ||
+		got.SourceAccountID != transfer.SourceAccountID() ||
+		got.DestinationAccountID != transfer.DestinationAccountID() ||
+		got.Currency != transfer.Amount().Currency().String() ||
+		got.AmountMinor != transfer.Amount().MinorUnits() ||
+		got.RequestedAt != transfer.RequestedAt().Format(time.RFC3339Nano) {
+		t.Errorf("completed event payload = %+v, want transfer data", got)
+	}
+}
+
+func (f *fixture) assertJournalEntryCount(t testing.TB, entryID string, want int) {
+	t.Helper()
+	var got int
+	if err := f.pool.QueryRow(
+		context.Background(),
+		`SELECT count(*) FROM journal_entries WHERE id = $1`,
+		entryID,
+	).Scan(&got); err != nil {
+		t.Fatalf("counting journal entries: %v", err)
+	}
+	if got != want {
+		t.Errorf("journal entry count = %d, want %d", got, want)
+	}
+}
+
 func (f *fixture) cleanup(t testing.TB) {
 	t.Helper()
 	ctx := context.Background()
+	if _, err := f.pool.Exec(
+		ctx,
+		`DELETE FROM outbox_events
+         WHERE aggregate_type = 'transfer'
+           AND aggregate_id IN (
+               SELECT id FROM transfers WHERE source_account_id = ANY($1::uuid[])
+           )`,
+		f.accountIDs,
+	); err != nil {
+		t.Errorf("cleaning transfer outbox events: %v", err)
+	}
+	if len(f.eventIDs) > 0 {
+		if _, err := f.pool.Exec(
+			ctx,
+			`DELETE FROM outbox_events WHERE event_id = ANY($1::uuid[])`,
+			f.eventIDs,
+		); err != nil {
+			t.Errorf("cleaning tracked outbox events: %v", err)
+		}
+	}
 	if _, err := f.pool.Exec(ctx, `DELETE FROM transfers WHERE source_account_id = ANY($1::uuid[])`, f.accountIDs); err != nil {
 		t.Errorf("cleaning transfers: %v", err)
 	}
