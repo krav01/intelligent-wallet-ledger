@@ -57,9 +57,10 @@ INSERT INTO transfers (
     destination_account_id,
     currency,
     amount_minor,
-    requested_at
+    requested_at,
+    journal_entry_id
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $1)
 ON CONFLICT (requester_id, idempotency_key) DO NOTHING
 RETURNING id::text`
 
