@@ -248,11 +248,22 @@ func validEventType(value string) bool {
 		return false
 	}
 	for part := range strings.SplitSeq(value, ".") {
-		if !validLowerName(part, false) {
+		if !validEventPart(part) {
 			return false
 		}
 	}
 	return true
+}
+
+func validEventPart(value string) bool {
+	for index, character := range []byte(value) {
+		if character >= 'a' && character <= 'z' || index > 0 && character >= '0' && character <= '9' ||
+			index > 0 && character == '_' {
+			continue
+		}
+		return false
+	}
+	return value != ""
 }
 
 func validAggregateType(value string) bool {
