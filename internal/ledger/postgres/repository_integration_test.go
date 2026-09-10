@@ -11,10 +11,41 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/krav01/intelligent-wallet-ledger/internal/ledger/domain"
 	ledgerpostgres "github.com/krav01/intelligent-wallet-ledger/internal/ledger/postgres"
 )
+
+func TestPostTxUsesCallerTransaction(t *testing.T) {
+	fixture := newFixture(t)
+	systemAccount := fixture.createAccount(t, "USD", "system")
+	customerAccount := fixture.createAccount(t, "USD", "customer")
+	entryID := fixture.newUUID(t)
+	entry := mustEntry(t, entryID, []domain.Posting{
+		mustPosting(t, systemAccount, -100, "USD"),
+		mustPosting(t, customerAccount, 100, "USD"),
+	})
+	fixture.trackEntry(entryID)
+
+	tx, err := fixture.pool.BeginTx(t.Context(), pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		t.Fatalf("BeginTx() error = %v", err)
+	}
+	if err := ledgerpostgres.PostTx(t.Context(), tx, entry); err != nil {
+		t.Fatalf("PostTx() error = %v", err)
+	}
+	if _, err := tx.Exec(t.Context(), "SELECT 1"); err != nil {
+		t.Fatalf("caller transaction was closed: %v", err)
+	}
+	if err := tx.Rollback(t.Context()); err != nil {
+		t.Fatalf("Rollback() error = %v", err)
+	}
+
+	fixture.assertEntryCount(t, entryID, 0)
+	fixture.assertBalance(t, systemAccount, 0, 0)
+	fixture.assertBalance(t, customerAccount, 0, 0)
+}
 
 func TestRepositoryPostGetAndReverse(t *testing.T) {
 	fixture := newFixture(t)

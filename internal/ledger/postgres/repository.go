@@ -140,6 +140,21 @@ func (r *Repository) Post(ctx context.Context, entry domain.JournalEntry) error 
 	return fmt.Errorf("%w: %w", ErrSerializationFailure, lastErr)
 }
 
+// PostTx stores an entry and applies its balance effects inside the supplied transaction.
+// The caller owns transaction commit, rollback, isolation, and retries.
+func PostTx(ctx context.Context, tx pgx.Tx, entry domain.JournalEntry) error {
+	if tx == nil {
+		return fmt.Errorf("%w: transaction is required", ErrInvalidArgument)
+	}
+
+	prepared, err := prepareEntry(entry)
+	if err != nil {
+		return err
+	}
+
+	return classifyPostError(postPrepared(ctx, tx, prepared))
+}
+
 // Get returns one transactionally consistent journal entry.
 func (r *Repository) Get(ctx context.Context, entryID string) (result domain.JournalEntry, err error) {
 	parsedID, err := parseUUID(entryID)
@@ -320,6 +335,17 @@ func (r *Repository) postOnce(ctx context.Context, prepared preparedEntry) (err 
 	}
 	defer finishTransaction(ctx, tx, &err)
 
+	if err := postPrepared(ctx, tx, prepared); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing ledger transaction: %w", err)
+	}
+
+	return nil
+}
+
+func postPrepared(ctx context.Context, tx pgx.Tx, prepared preparedEntry) error {
 	if prepared.reversesID != nil {
 		if err := validatePersistedReversal(ctx, tx, prepared); err != nil {
 			return err
@@ -336,9 +362,6 @@ func (r *Repository) postOnce(ctx context.Context, prepared preparedEntry) (err 
 	}
 	if err := updateBalances(ctx, tx, prepared.changes); err != nil {
 		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("committing ledger transaction: %w", err)
 	}
 
 	return nil
