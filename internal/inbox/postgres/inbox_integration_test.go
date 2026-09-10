@@ -59,6 +59,22 @@ func TestReserveTxDeduplicatesPerConsumerAndRollsBack(t *testing.T) {
 	fixture.assertCount(t, envelope.EventID(), 2)
 }
 
+func TestReserveTxAcceptsEventTypeWithUnderscore(t *testing.T) {
+	fixture := newFixture(t)
+	envelope := fixture.envelopeWithEventType(t, "transfer.risk_assessed")
+	fixture.track(envelope.EventID())
+
+	tx := fixture.begin(t)
+	reserved, err := inboxpostgres.ReserveTx(t.Context(), tx, "risk-worker.v1", envelope)
+	if err != nil || !reserved {
+		t.Fatalf("ReserveTx() = (%t, %v), want (true, nil)", reserved, err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	fixture.assertCount(t, envelope.EventID(), 1)
+}
+
 func TestReserveTxConcurrentDuplicatesCommitOnce(t *testing.T) {
 	fixture := newFixture(t)
 	envelope := fixture.envelope(t)
@@ -179,11 +195,15 @@ func (f *fixture) begin(t testing.TB) pgx.Tx {
 }
 
 func (f *fixture) envelope(t testing.TB) event.Envelope {
+	return f.envelopeWithEventType(t, "transfer.completed")
+}
+
+func (f *fixture) envelopeWithEventType(t testing.TB, eventType string) event.Envelope {
 	t.Helper()
 	eventID := f.newUUID(t)
 	aggregateID := f.newUUID(t)
 	draft, err := event.NewDraft(event.DraftParams{
-		EventType:        "transfer.completed",
+		EventType:        eventType,
 		EventVersion:     1,
 		AggregateType:    "transfer",
 		AggregateID:      aggregateID,

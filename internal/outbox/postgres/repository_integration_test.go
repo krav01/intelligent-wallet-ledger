@@ -74,6 +74,27 @@ func TestAddTxAcceptsPostgreSQLJSONBBoundary(t *testing.T) {
 	fixture.assertEventCount(t, envelope.EventID(), 1)
 }
 
+func TestAddTxAcceptsEventTypeWithUnderscore(t *testing.T) {
+	fixture := newFixture(t)
+	id := fixture.newUUID(t)
+	draft, err := event.NewDraft(event.DraftParams{
+		EventType:        "transfer.risk_assessed",
+		EventVersion:     1,
+		AggregateType:    "transfer",
+		AggregateID:      id,
+		AggregateVersion: 2,
+		CorrelationID:    id,
+		OccurredAt:       time.Now().UTC().Truncate(time.Microsecond),
+		Payload:          json.RawMessage(`{"transfer_id":"` + id + `"}`),
+	})
+	if err != nil {
+		t.Fatalf("NewDraft() error = %v", err)
+	}
+
+	envelope := fixture.add(t, draft)
+	fixture.assertEventCount(t, envelope.EventID(), 1)
+}
+
 func TestAddTxClassifiesPostgreSQLJSONBRejection(t *testing.T) {
 	fixture := newFixture(t)
 	draft := fixture.draftWithPayload(t, json.RawMessage(`{"value":"\u0000"}`))

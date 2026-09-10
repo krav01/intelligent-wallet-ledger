@@ -91,6 +91,16 @@ func TestNewDraftRejectsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestNewDraftAcceptsEventTypeWithUnderscore(t *testing.T) {
+	t.Parallel()
+	params := validDraftParams()
+	params.EventType = "transfer.risk_assessed"
+
+	if _, err := event.NewDraft(params); err != nil {
+		t.Fatalf("NewDraft() error = %v", err)
+	}
+}
+
 func TestNewDraftAcceptsPostgreSQLJSONBBoundary(t *testing.T) {
 	t.Parallel()
 	params := validDraftParams()
