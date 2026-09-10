@@ -80,6 +80,8 @@ See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and
 
 Roadmap slices 1 through 4 are implemented: repository foundation, immutable money
 value objects, PostgreSQL-backed wallets, and the transactional double-entry ledger.
+The first part of slice 5 defines validated requester-scoped transfer intents and their
+deterministic conversion to balanced ledger entries.
 Ledger posting locks accounts in stable order and atomically stores entries, postings,
 and balance snapshots. Customer accounts remain nonnegative; controlled system
 accounts provide the settlement side. Unit and tagged integration tests cover domain,
