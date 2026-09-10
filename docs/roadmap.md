@@ -13,9 +13,9 @@ is small and coherent.
 5. [x] Transfers, idempotency keys, stable account locking, and concurrency tests.
    - [x] Pure transfer intent with positive amounts, distinct accounts, and balanced postings.
    - [x] Atomic PostgreSQL idempotency, ledger composition, and replay/concurrency tests.
-6. Transactional outbox, Kafka publisher, event envelopes, and consumer inboxes.
+6. [x] Transactional outbox, Kafka publisher, event envelopes, and consumer inboxes.
    - [x] Versioned event envelope plus PostgreSQL outbox and consumer inbox foundation.
-   - [ ] Kafka publisher, redelivery proof, and local end-to-end demo.
+   - [x] Kafka publisher, redelivery proof, and local end-to-end demo.
 7. Asynchronous transfer lifecycle and deterministic risk engine.
 8. Redis velocity signals, manual-review cases, and explicit degraded-mode policy.
 9. AI Investigator port, mock provider, privacy boundary, and provider-failure tests.

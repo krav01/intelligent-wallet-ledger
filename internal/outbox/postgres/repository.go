@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/krav01/intelligent-wallet-ledger/internal/event"
+	"github.com/krav01/intelligent-wallet-ledger/internal/outbox"
 )
 
 const (
@@ -80,14 +81,6 @@ type Repository struct {
 	pool *pgxpool.Pool
 }
 
-// ClaimedEvent contains an envelope, its failure count, and its fencing token.
-type ClaimedEvent struct {
-	Envelope        event.Envelope
-	Sequence        int64
-	PublishAttempts int32
-	ClaimToken      string
-}
-
 // NewRepository creates a PostgreSQL outbox repository.
 func NewRepository(pool *pgxpool.Pool) (*Repository, error) {
 	if pool == nil {
@@ -102,7 +95,7 @@ func (r *Repository) Claim(
 	ctx context.Context,
 	limit int,
 	lease time.Duration,
-) (claimed []ClaimedEvent, err error) {
+) (claimed []outbox.ClaimedEvent, err error) {
 	if limit <= 0 || limit > maxClaimBatch {
 		return nil, fmt.Errorf("%w: claim limit must be between 1 and %d", ErrInvalidArgument, maxClaimBatch)
 	}
@@ -126,7 +119,7 @@ func (r *Repository) Claim(
 	}
 	defer rows.Close()
 
-	claimed = []ClaimedEvent{}
+	claimed = []outbox.ClaimedEvent{}
 	for rows.Next() {
 		stored, scanErr := scanClaimedEvent(rows, claimToken)
 		if scanErr != nil {
@@ -139,7 +132,7 @@ func (r *Repository) Claim(
 	}
 	rows.Close()
 
-	slices.SortFunc(claimed, func(left, right ClaimedEvent) int {
+	slices.SortFunc(claimed, func(left, right outbox.ClaimedEvent) int {
 		return cmp.Compare(left.Sequence, right.Sequence)
 	})
 	if err := tx.Commit(ctx); err != nil {
@@ -205,8 +198,8 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanClaimedEvent(row rowScanner, claimToken string) (ClaimedEvent, error) {
-	stored := ClaimedEvent{ClaimToken: claimToken}
+func scanClaimedEvent(row rowScanner, claimToken string) (outbox.ClaimedEvent, error) {
+	stored := outbox.ClaimedEvent{ClaimToken: claimToken}
 	var eventID string
 	var params event.DraftParams
 	var payload []byte
@@ -224,16 +217,16 @@ func scanClaimedEvent(row rowScanner, claimToken string) (ClaimedEvent, error) {
 		&payload,
 		&stored.PublishAttempts,
 	); err != nil {
-		return ClaimedEvent{}, fmt.Errorf("scanning claimed outbox event: %w", err)
+		return outbox.ClaimedEvent{}, fmt.Errorf("scanning claimed outbox event: %w", err)
 	}
 	params.Payload = payload
 	draft, err := event.NewDraft(params)
 	if err != nil {
-		return ClaimedEvent{}, fmt.Errorf("%w: event draft: %w", ErrCorruptData, err)
+		return outbox.ClaimedEvent{}, fmt.Errorf("%w: event draft: %w", ErrCorruptData, err)
 	}
 	stored.Envelope, err = event.NewEnvelope(eventID, draft)
 	if err != nil {
-		return ClaimedEvent{}, fmt.Errorf("%w: event envelope: %w", ErrCorruptData, err)
+		return outbox.ClaimedEvent{}, fmt.Errorf("%w: event envelope: %w", ErrCorruptData, err)
 	}
 
 	return stored, nil

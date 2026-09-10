@@ -115,6 +115,43 @@ func TestNewEnvelopeRejectsInvalidID(t *testing.T) {
 	}
 }
 
+func TestParseEnvelopeRoundTrip(t *testing.T) {
+	t.Parallel()
+	draft, err := event.NewDraft(validDraftParams())
+	if err != nil {
+		t.Fatalf("NewDraft() error = %v", err)
+	}
+	want, err := event.NewEnvelope(eventID, draft)
+	if err != nil {
+		t.Fatalf("NewEnvelope() error = %v", err)
+	}
+	encoded, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	got, err := event.ParseEnvelope(encoded)
+	if err != nil {
+		t.Fatalf("ParseEnvelope() error = %v", err)
+	}
+	if got.EventID() != want.EventID() || got.EventType() != want.EventType() ||
+		got.EventVersion() != want.EventVersion() || got.AggregateID() != want.AggregateID() ||
+		string(got.Payload()) != string(want.Payload()) {
+		t.Errorf("ParseEnvelope() = %+v, want round trip", got)
+	}
+}
+
+func TestParseEnvelopeRejectsUnknownAndTrailingData(t *testing.T) {
+	t.Parallel()
+	for _, encoded := range []string{
+		`{"unknown":true}`,
+		`{} {}`,
+	} {
+		if _, err := event.ParseEnvelope([]byte(encoded)); !errors.Is(err, event.ErrInvalidEnvelope) {
+			t.Errorf("ParseEnvelope(%q) error = %v, want ErrInvalidEnvelope", encoded, err)
+		}
+	}
+}
+
 func validDraftParams() event.DraftParams {
 	return event.DraftParams{
 		EventType:        "transfer.completed",

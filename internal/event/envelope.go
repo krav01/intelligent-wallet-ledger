@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 )
@@ -50,6 +51,19 @@ type Draft struct {
 type Envelope struct {
 	eventID string
 	draft   Draft
+}
+
+type envelopeJSON struct {
+	EventID          string          `json:"event_id"`
+	EventType        string          `json:"event_type"`
+	EventVersion     int16           `json:"event_version"`
+	AggregateType    string          `json:"aggregate_type"`
+	AggregateID      string          `json:"aggregate_id"`
+	AggregateVersion int64           `json:"aggregate_version"`
+	CorrelationID    string          `json:"correlation_id"`
+	CausationID      string          `json:"causation_id,omitempty"`
+	OccurredAt       time.Time       `json:"occurred_at"`
+	Payload          json.RawMessage `json:"payload"`
 }
 
 // NewDraft validates and creates an event draft.
@@ -97,6 +111,34 @@ func NewEnvelope(eventID string, draft Draft) (Envelope, error) {
 	}
 
 	return Envelope{eventID: canonicalID, draft: draft}, nil
+}
+
+// ParseEnvelope strictly decodes and validates a transport envelope.
+func ParseEnvelope(encoded []byte) (Envelope, error) {
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.DisallowUnknownFields()
+	var stored envelopeJSON
+	if err := decoder.Decode(&stored); err != nil {
+		return Envelope{}, fmt.Errorf("%w: decoding JSON: %w", ErrInvalidEnvelope, err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return Envelope{}, fmt.Errorf("%w: trailing JSON data", ErrInvalidEnvelope)
+	}
+	draft, err := NewDraft(DraftParams{
+		EventType:        stored.EventType,
+		EventVersion:     stored.EventVersion,
+		AggregateType:    stored.AggregateType,
+		AggregateID:      stored.AggregateID,
+		AggregateVersion: stored.AggregateVersion,
+		CorrelationID:    stored.CorrelationID,
+		CausationID:      stored.CausationID,
+		OccurredAt:       stored.OccurredAt,
+		Payload:          stored.Payload,
+	})
+	if err != nil {
+		return Envelope{}, err
+	}
+	return NewEnvelope(stored.EventID, draft)
 }
 
 // EventID returns the durable event identifier.
@@ -162,18 +204,7 @@ func (e Envelope) MarshalJSON() ([]byte, error) {
 		return nil, ErrInvalidEnvelope
 	}
 
-	return json.Marshal(struct {
-		EventID          string          `json:"event_id"`
-		EventType        string          `json:"event_type"`
-		EventVersion     int16           `json:"event_version"`
-		AggregateType    string          `json:"aggregate_type"`
-		AggregateID      string          `json:"aggregate_id"`
-		AggregateVersion int64           `json:"aggregate_version"`
-		CorrelationID    string          `json:"correlation_id"`
-		CausationID      string          `json:"causation_id,omitempty"`
-		OccurredAt       time.Time       `json:"occurred_at"`
-		Payload          json.RawMessage `json:"payload"`
-	}{
+	return json.Marshal(envelopeJSON{
 		EventID:          e.eventID,
 		EventType:        e.EventType(),
 		EventVersion:     e.EventVersion(),

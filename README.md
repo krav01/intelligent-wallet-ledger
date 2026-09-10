@@ -20,10 +20,10 @@ curl http://localhost:8080/healthz
 # {"status":"ok"}
 ```
 
-The target portfolio demo will prove, with tests and observable output, that duplicate
-requests do not double-spend, concurrent withdrawals cannot overdraw an account,
-Kafka redelivery is safe, reconciliation detects mismatches, and AI outages do not
-affect payment processing.
+The portfolio checks prove, with tests and observable output, that duplicate requests
+do not double-spend, concurrent withdrawals cannot overdraw an account, and Kafka
+redelivery does not repeat a consumer's database effect. Later slices add visible
+reconciliation and AI-outage proofs.
 
 ## Getting started
 
@@ -43,12 +43,23 @@ make migrate-up
 curl http://localhost:8080/readyz
 ```
 
-Run the PostgreSQL adapter tests against the migrated local database:
+Run the PostgreSQL and Kafka adapter tests against the migrated local services:
 
 ```bash
 TEST_DATABASE_URL='postgres://wallet:wallet_dev_only@localhost:5432/wallet?sslmode=disable' \
+  KAFKA_BROKERS='localhost:9092' \
   make test-integration
 ```
+
+Run the focused outbox demo:
+
+```bash
+make demo-outbox
+```
+
+The demo deliberately simulates a publisher crash after Kafka acknowledges a record
+but before PostgreSQL records completion. It then republishes the same event and
+verifies that the consumer inbox applies the database side effect once.
 
 ## Architecture
 
@@ -78,8 +89,7 @@ See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and
 
 ## Current status
 
-Roadmap slices 1 through 5 are implemented, together with the PostgreSQL foundation
-of slice 6: repository foundation, immutable money
+Roadmap slices 1 through 6 are implemented: repository foundation, immutable money
 value objects, PostgreSQL-backed wallets, the transactional double-entry ledger, and
 requester-scoped idempotent customer transfers.
 Ledger posting locks accounts in stable order and atomically stores entries, postings,
@@ -89,8 +99,9 @@ or event, while changed intent conflicts.
 Customer accounts remain nonnegative; controlled system accounts provide the
 settlement side. Unit and tagged integration tests cover domain, persistence,
 atomicity, replay, authorization, reversal, overflow, outbox leasing/fencing,
-consumer deduplication, and concurrency boundaries. Kafka publication remains the
-next slice 6 increment.
+consumer deduplication, and concurrency boundaries. A dedicated process publishes
+the durable outbox to Kafka with stable aggregate keys and all-ISR acknowledgements;
+the integration suite proves safe redelivery after a lost completion update.
 
 ## Development
 
