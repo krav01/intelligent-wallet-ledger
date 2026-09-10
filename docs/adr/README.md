@@ -10,3 +10,4 @@ history.
 - [ADR-0004: Balanced immutable ledger domain](0004-balanced-ledger-domain.md)
 - [ADR-0005: Transactional ledger persistence and account types](0005-transactional-ledger-persistence.md)
 - [ADR-0006: Requester-scoped transfer idempotency](0006-requester-scoped-transfer-idempotency.md)
+- [ADR-0007: Transactional outbox and idempotent consumer delivery](0007-transactional-outbox-delivery.md)
