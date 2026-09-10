@@ -153,6 +153,72 @@ func TestTransferLifecycleConstraints(t *testing.T) {
 	}
 }
 
+func TestTransferRiskAssessmentSchema(t *testing.T) {
+	fixture := newFixture(t)
+	ownerID := fixture.newUUID(t)
+	sourceID := fixture.createAccount(t, ownerID, "USD", "customer", "active")
+	destinationID := fixture.createAccount(t, fixture.newUUID(t), "USD", "customer", "active")
+	pending := fixture.transfer(t, ownerID, sourceID, destinationID, "risk-assessment", 40)
+	if _, err := fixture.pool.Exec(
+		t.Context(),
+		`INSERT INTO transfers (
+			id, requester_id, idempotency_key, source_account_id, destination_account_id,
+			currency, amount_minor, requested_at, status, state_version, risk_policy_version
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending_risk', 1, 'risk-v1')`,
+		pending.ID(),
+		pending.RequesterID(),
+		pending.IdempotencyKey(),
+		pending.SourceAccountID(),
+		pending.DestinationAccountID(),
+		pending.Amount().Currency().String(),
+		pending.Amount().MinorUnits(),
+		pending.RequestedAt(),
+	); err != nil {
+		t.Fatalf("inserting pending transfer: %v", err)
+	}
+	if _, err := fixture.pool.Exec(
+		t.Context(),
+		`UPDATE transfers SET status = 'review_required', state_version = 2 WHERE id = $1`,
+		pending.ID(),
+	); err != nil {
+		t.Fatalf("transitioning transfer for assessment: %v", err)
+	}
+
+	causationEventID := fixture.newUUID(t)
+	if _, err := fixture.pool.Exec(
+		t.Context(),
+		`INSERT INTO transfer_risk_assessments (
+			transfer_id, lifecycle_version, causation_event_id, policy_version,
+			captured_input, score, decision, signals, assessed_at
+		)
+		VALUES ($1, 2, $2, 'risk-v1', $3, 600, 'review', $4, $5)`,
+		pending.ID(),
+		causationEventID,
+		[]byte(`{"amount_minor":40,"currency":"USD"}`),
+		[]byte(`[{"code":"amount_review_threshold","contribution":600}]`),
+		pending.RequestedAt(),
+	); err != nil {
+		t.Fatalf("inserting risk assessment: %v", err)
+	}
+
+	if _, err := fixture.pool.Exec(
+		t.Context(),
+		`INSERT INTO transfer_risk_assessments (
+			transfer_id, lifecycle_version, causation_event_id, policy_version,
+			captured_input, score, decision, signals, assessed_at
+		)
+		VALUES ($1, 2, $2, 'risk-v1', $3, 600, 'review', $4, $5)`,
+		pending.ID(),
+		fixture.newUUID(t),
+		[]byte(`{"amount_minor":40,"currency":"USD"}`),
+		[]byte(`[{"code":"amount_review_threshold","contribution":600}]`),
+		pending.RequestedAt(),
+	); err == nil {
+		t.Error("inserting duplicate transfer lifecycle assessment succeeded")
+	}
+}
+
 func TestRepositoryFailureDoesNotReserveKey(t *testing.T) {
 	fixture := newFixture(t)
 	repository := mustRepository(t, fixture.pool)
@@ -602,6 +668,16 @@ func (f *fixture) cleanup(t testing.TB) {
 		f.accountIDs,
 	); err != nil {
 		t.Errorf("cleaning transfer outbox events: %v", err)
+	}
+	if _, err := f.pool.Exec(
+		ctx,
+		`DELETE FROM transfer_risk_assessments
+         WHERE transfer_id IN (
+               SELECT id FROM transfers WHERE source_account_id = ANY($1::uuid[])
+         )`,
+		f.accountIDs,
+	); err != nil {
+		t.Errorf("cleaning transfer risk assessments: %v", err)
 	}
 	if len(f.eventIDs) > 0 {
 		if _, err := f.pool.Exec(
