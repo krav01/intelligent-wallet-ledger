@@ -17,6 +17,8 @@ is small and coherent.
    - [x] Versioned event envelope plus PostgreSQL outbox and consumer inbox foundation.
    - [x] Kafka publisher, redelivery proof, and local end-to-end demo.
 7. Asynchronous transfer lifecycle and deterministic risk engine.
+   - [x] Pure lifecycle state machine and versioned deterministic risk policy.
+   - [ ] Reviewed persistence migration, workers, event contracts, and end-to-end demo.
 8. Redis velocity signals, manual-review cases, and explicit degraded-mode policy.
 9. AI Investigator port, mock provider, privacy boundary, and provider-failure tests.
 10. Reconciliation, audit trail, RBAC, and API abuse protection.
