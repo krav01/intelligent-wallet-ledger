@@ -1,6 +1,6 @@
 # ADR-0008: Asynchronous transfer lifecycle and deterministic risk assessment
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-11
 
 ## Context
