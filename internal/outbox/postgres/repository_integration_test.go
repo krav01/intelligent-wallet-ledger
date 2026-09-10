@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/krav01/intelligent-wallet-ledger/internal/event"
+	"github.com/krav01/intelligent-wallet-ledger/internal/outbox"
 	outboxpostgres "github.com/krav01/intelligent-wallet-ledger/internal/outbox/postgres"
 )
 
@@ -193,7 +194,7 @@ func TestRepositoryConcurrentClaimsAreDisjoint(t *testing.T) {
 		fixture.add(t, fixture.draft(t))
 	}
 	const workers = 2
-	results := make(chan []outboxpostgres.ClaimedEvent, workers)
+	results := make(chan []outbox.ClaimedEvent, workers)
 	errorsCh := make(chan error, workers)
 	var group sync.WaitGroup
 	for range workers {
