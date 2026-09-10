@@ -42,8 +42,10 @@ each participating snapshot version once within a serializable transaction.
 A transfer is an immutable requester-scoped intent with a bounded idempotency key, a
 positive amount, and distinct source and destination accounts. Its server-assigned
 transfer ID is also the journal entry ID, and it always maps to a source debit followed
-by an equal destination credit. PostgreSQL idempotency and authorization semantics
-are defined by ADR-0006 for the persistence sub-slice.
+by an equal destination credit. PostgreSQL reserves the requester-scoped key before
+authorization and ledger posting in one serializable transaction; an identical replay
+returns the committed transfer and changed intent conflicts. Authorization semantics
+follow ADR-0006.
 
 ## Asynchronous delivery
 

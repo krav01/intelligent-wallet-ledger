@@ -10,9 +10,9 @@ is small and coherent.
 4. [x] Immutable ledger with balanced postings and reversal entries.
    - [x] Pure domain model with exact per-currency balancing and reversals.
    - [x] PostgreSQL persistence, constraints, and atomic balance updates.
-5. Transfers, idempotency keys, stable account locking, and concurrency tests.
+5. [x] Transfers, idempotency keys, stable account locking, and concurrency tests.
    - [x] Pure transfer intent with positive amounts, distinct accounts, and balanced postings.
-   - [ ] Atomic PostgreSQL idempotency, ledger composition, and replay/concurrency tests.
+   - [x] Atomic PostgreSQL idempotency, ledger composition, and replay/concurrency tests.
 6. Transactional outbox, Kafka publisher, event envelopes, and consumer inboxes.
 7. Asynchronous transfer lifecycle and deterministic risk engine.
 8. Redis velocity signals, manual-review cases, and explicit degraded-mode policy.

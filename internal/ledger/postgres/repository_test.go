@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"errors"
 	"math"
 	"testing"
@@ -9,6 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/krav01/intelligent-wallet-ledger/internal/ledger/domain"
 )
+
+func TestPostTxRejectsNilTransaction(t *testing.T) {
+	t.Parallel()
+
+	err := PostTx(context.Background(), nil, domain.JournalEntry{})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("PostTx(nil) error = %v, want ErrInvalidArgument", err)
+	}
+}
 
 const (
 	accountA = "00000000-0000-0000-0000-00000000000a"
