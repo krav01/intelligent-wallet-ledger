@@ -68,6 +68,91 @@ func TestRepositoryCreateReplayAndConflict(t *testing.T) {
 	fixture.assertOutboxEventCount(t, original.ID(), 1)
 }
 
+func TestRepositoryCreateStoresCompletedLifecycle(t *testing.T) {
+	fixture := newFixture(t)
+	repository := mustRepository(t, fixture.pool)
+	ownerID := fixture.newUUID(t)
+	sourceID := fixture.createAccount(t, ownerID, "USD", "customer", "active")
+	destinationID := fixture.createAccount(t, fixture.newUUID(t), "USD", "customer", "active")
+	fixture.fund(t, sourceID, 100)
+
+	transfer := fixture.transfer(t, ownerID, sourceID, destinationID, "completed-lifecycle", 40)
+	if _, err := repository.Create(t.Context(), transfer); err != nil {
+		t.Fatalf("Repository.Create() error = %v", err)
+	}
+
+	var status, journalEntryID string
+	var stateVersion int64
+	var riskPolicyVersion, failureReason *string
+	if err := fixture.pool.QueryRow(
+		t.Context(),
+		`SELECT status, state_version, risk_policy_version, journal_entry_id::text, failure_reason
+		 FROM transfers
+		 WHERE id = $1`,
+		transfer.ID(),
+	).Scan(&status, &stateVersion, &riskPolicyVersion, &journalEntryID, &failureReason); err != nil {
+		t.Fatalf("selecting transfer lifecycle: %v", err)
+	}
+	if status != "completed" || stateVersion != 1 || journalEntryID != transfer.ID() ||
+		riskPolicyVersion != nil || failureReason != nil {
+		t.Errorf(
+			"lifecycle = (%q, %d, %v, %q, %v), want completed legacy lifecycle",
+			status,
+			stateVersion,
+			riskPolicyVersion,
+			journalEntryID,
+			failureReason,
+		)
+	}
+}
+
+func TestTransferLifecycleConstraints(t *testing.T) {
+	fixture := newFixture(t)
+	ownerID := fixture.newUUID(t)
+	sourceID := fixture.createAccount(t, ownerID, "USD", "customer", "active")
+	destinationID := fixture.createAccount(t, fixture.newUUID(t), "USD", "customer", "active")
+
+	pending := fixture.transfer(t, ownerID, sourceID, destinationID, "pending-lifecycle", 40)
+	if _, err := fixture.pool.Exec(
+		t.Context(),
+		`INSERT INTO transfers (
+			id, requester_id, idempotency_key, source_account_id, destination_account_id,
+			currency, amount_minor, requested_at, status, state_version, risk_policy_version
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending_risk', 1, 'risk-v1')`,
+		pending.ID(),
+		pending.RequesterID(),
+		pending.IdempotencyKey(),
+		pending.SourceAccountID(),
+		pending.DestinationAccountID(),
+		pending.Amount().Currency().String(),
+		pending.Amount().MinorUnits(),
+		pending.RequestedAt(),
+	); err != nil {
+		t.Fatalf("inserting pending lifecycle transfer: %v", err)
+	}
+
+	invalidCompleted := fixture.transfer(t, ownerID, sourceID, destinationID, "invalid-completed", 41)
+	if _, err := fixture.pool.Exec(
+		t.Context(),
+		`INSERT INTO transfers (
+			id, requester_id, idempotency_key, source_account_id, destination_account_id,
+			currency, amount_minor, requested_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		invalidCompleted.ID(),
+		invalidCompleted.RequesterID(),
+		invalidCompleted.IdempotencyKey(),
+		invalidCompleted.SourceAccountID(),
+		invalidCompleted.DestinationAccountID(),
+		invalidCompleted.Amount().Currency().String(),
+		invalidCompleted.Amount().MinorUnits(),
+		invalidCompleted.RequestedAt(),
+	); err == nil {
+		t.Error("inserting completed lifecycle transfer without journal entry succeeded")
+	}
+}
+
 func TestRepositoryFailureDoesNotReserveKey(t *testing.T) {
 	fixture := newFixture(t)
 	repository := mustRepository(t, fixture.pool)
