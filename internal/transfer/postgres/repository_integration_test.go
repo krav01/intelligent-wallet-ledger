@@ -302,10 +302,29 @@ func TestStoreRiskAssessmentTx(t *testing.T) {
 	).Scan(&status, &version, &score, &input, &signals); err != nil {
 		t.Fatalf("selecting persisted risk assessment: %v", err)
 	}
-	if status != "review_required" || version != 2 || score != 600 ||
-		string(input) != `{"amount_minor": 60, "currency": "USD"}` ||
-		string(signals) != `[{"code": "amount_review_threshold", "contribution": 600}]` {
-		t.Errorf("persisted risk assessment = (%q, %d, %d, %s, %s), want canonical review result", status, version, score, input, signals)
+	if status != "review_required" || version != 2 || score != 600 {
+		t.Errorf("persisted risk assessment = (%q, %d, %d), want review_required version 2 score 600", status, version, score)
+	}
+	var storedInput struct {
+		AmountMinor int64  `json:"amount_minor"`
+		Currency    string `json:"currency"`
+	}
+	if err := json.Unmarshal(input, &storedInput); err != nil {
+		t.Fatalf("decoding captured input: %v", err)
+	}
+	if storedInput.AmountMinor != 60 || storedInput.Currency != "USD" {
+		t.Errorf("captured input = %+v, want amount 60 USD", storedInput)
+	}
+	var storedSignals []struct {
+		Code         string `json:"code"`
+		Contribution int    `json:"contribution"`
+	}
+	if err := json.Unmarshal(signals, &storedSignals); err != nil {
+		t.Fatalf("decoding stored signals: %v", err)
+	}
+	if len(storedSignals) != 1 || storedSignals[0].Code != "amount_review_threshold" ||
+		storedSignals[0].Contribution != 600 {
+		t.Errorf("stored signals = %+v, want one amount review signal", storedSignals)
 	}
 }
 
