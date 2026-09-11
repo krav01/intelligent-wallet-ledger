@@ -11,10 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	ledgerdomain "github.com/krav01/intelligent-wallet-ledger/internal/ledger/domain"
 	ledgerpostgres "github.com/krav01/intelligent-wallet-ledger/internal/ledger/postgres"
 	outboxpostgres "github.com/krav01/intelligent-wallet-ledger/internal/outbox/postgres"
+	riskdomain "github.com/krav01/intelligent-wallet-ledger/internal/risk/domain"
 	transferdomain "github.com/krav01/intelligent-wallet-ledger/internal/transfer/domain"
 	transferevents "github.com/krav01/intelligent-wallet-ledger/internal/transfer/events"
 	transferpostgres "github.com/krav01/intelligent-wallet-ledger/internal/transfer/postgres"
@@ -216,6 +218,113 @@ func TestTransferRiskAssessmentSchema(t *testing.T) {
 		pending.RequestedAt(),
 	); err == nil {
 		t.Error("inserting duplicate transfer lifecycle assessment succeeded")
+	}
+}
+
+func TestStoreRiskAssessmentTx(t *testing.T) {
+	fixture := newFixture(t)
+	ownerID := fixture.newUUID(t)
+	sourceID := fixture.createAccount(t, ownerID, "USD", "customer", "active")
+	destinationID := fixture.createAccount(t, fixture.newUUID(t), "USD", "customer", "active")
+	pending := fixture.transfer(t, ownerID, sourceID, destinationID, "risk-transition", 60)
+	if _, err := fixture.pool.Exec(
+		t.Context(),
+		`INSERT INTO transfers (
+			id, requester_id, idempotency_key, source_account_id, destination_account_id,
+			currency, amount_minor, requested_at, status, state_version, risk_policy_version
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending_risk', 1, 'risk-v1')`,
+		pending.ID(),
+		pending.RequesterID(),
+		pending.IdempotencyKey(),
+		pending.SourceAccountID(),
+		pending.DestinationAccountID(),
+		pending.Amount().Currency().String(),
+		pending.Amount().MinorUnits(),
+		pending.RequestedAt(),
+	); err != nil {
+		t.Fatalf("inserting pending transfer: %v", err)
+	}
+
+	policy, err := riskdomain.NewPolicy(riskdomain.PolicyParams{
+		Version: "risk-v1",
+		Thresholds: []riskdomain.Threshold{{
+			Currency:           pending.Amount().Currency(),
+			ReviewAmountMinor:  50,
+			DeclineAmountMinor: 100,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewPolicy() error = %v", err)
+	}
+	evaluation, err := policy.Evaluate(riskdomain.Input{Amount: pending.Amount()})
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+
+	tx, err := fixture.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatalf("beginning transaction: %v", err)
+	}
+	defer func() {
+		if err := tx.Rollback(t.Context()); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			t.Errorf("rolling back transaction: %v", err)
+		}
+	}()
+	current, err := transferpostgres.LoadLifecycleForUpdateTx(t.Context(), tx, pending.ID())
+	if err != nil {
+		t.Fatalf("LoadLifecycleForUpdateTx() error = %v", err)
+	}
+	next, err := current.RequireReview()
+	if err != nil {
+		t.Fatalf("RequireReview() error = %v", err)
+	}
+	causationID := fixture.newUUID(t)
+	if err := transferpostgres.StoreRiskAssessmentTx(
+		t.Context(), tx, current, next, evaluation, causationID, pending.RequestedAt(),
+	); err != nil {
+		t.Fatalf("StoreRiskAssessmentTx() error = %v", err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatalf("committing risk assessment: %v", err)
+	}
+
+	var status string
+	var version, score int64
+	var input, signals []byte
+	if err := fixture.pool.QueryRow(
+		t.Context(),
+		`SELECT t.status, t.state_version, a.score, a.captured_input, a.signals
+		 FROM transfers AS t
+		 JOIN transfer_risk_assessments AS a ON a.transfer_id = t.id
+		 WHERE t.id = $1`,
+		pending.ID(),
+	).Scan(&status, &version, &score, &input, &signals); err != nil {
+		t.Fatalf("selecting persisted risk assessment: %v", err)
+	}
+	if status != "review_required" || version != 2 || score != 600 {
+		t.Errorf("persisted risk assessment = (%q, %d, %d), want review_required version 2 score 600", status, version, score)
+	}
+	var storedInput struct {
+		AmountMinor int64  `json:"amount_minor"`
+		Currency    string `json:"currency"`
+	}
+	if err := json.Unmarshal(input, &storedInput); err != nil {
+		t.Fatalf("decoding captured input: %v", err)
+	}
+	if storedInput.AmountMinor != 60 || storedInput.Currency != "USD" {
+		t.Errorf("captured input = %+v, want amount 60 USD", storedInput)
+	}
+	var storedSignals []struct {
+		Code         string `json:"code"`
+		Contribution int    `json:"contribution"`
+	}
+	if err := json.Unmarshal(signals, &storedSignals); err != nil {
+		t.Fatalf("decoding stored signals: %v", err)
+	}
+	if len(storedSignals) != 1 || storedSignals[0].Code != "amount_review_threshold" ||
+		storedSignals[0].Contribution != 600 {
+		t.Errorf("stored signals = %+v, want one amount review signal", storedSignals)
 	}
 }
 
