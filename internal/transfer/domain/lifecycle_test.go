@@ -164,6 +164,22 @@ func TestNewLifecycleValidatesPersistedState(t *testing.T) {
 	}
 }
 
+func TestNewLifecycleAcceptsHistoricalCompletedTransfer(t *testing.T) {
+	transfer := mustTransfer(t)
+	lifecycle, err := transferdomain.NewLifecycle(transferdomain.LifecycleParams{
+		Transfer:       transfer,
+		Status:         transferdomain.StatusCompleted,
+		Version:        1,
+		JournalEntryID: transfer.ID(),
+	})
+	if err != nil {
+		t.Fatalf("NewLifecycle() error = %v", err)
+	}
+	if lifecycle.Status() != transferdomain.StatusCompleted || lifecycle.RiskPolicyVersion() != "" {
+		t.Errorf("NewLifecycle() = (%s, %q), want historical completed lifecycle", lifecycle.Status(), lifecycle.RiskPolicyVersion())
+	}
+}
+
 func mustPendingLifecycle(t testing.TB) transferdomain.Lifecycle {
 	t.Helper()
 	lifecycle, err := transferdomain.NewPendingLifecycle(mustTransfer(t), "risk-v1")

@@ -184,7 +184,7 @@ func (l Lifecycle) validate() error {
 	if err := l.transfer.validate(); err != nil {
 		return fmt.Errorf("%w: transfer: %w", ErrInvalidLifecycle, err)
 	}
-	if !validPolicyVersion(l.riskPolicyVersion) || l.version <= 0 {
+	if l.version <= 0 {
 		return ErrInvalidLifecycle
 	}
 
@@ -198,14 +198,20 @@ func (l Lifecycle) validate() error {
 			return ErrInvalidLifecycle
 		}
 	case StatusCompleted:
-		if l.journalEntryID != l.transfer.ID() || l.failureReason != "" {
+		if l.journalEntryID != l.transfer.ID() || l.failureReason != "" ||
+			(l.riskPolicyVersion != "" && !validPolicyVersion(l.riskPolicyVersion)) ||
+			(l.version != pendingRiskVersion && !validPolicyVersion(l.riskPolicyVersion)) {
 			return ErrInvalidLifecycle
 		}
 	case StatusFailed:
-		if l.version < 2 || l.journalEntryID != "" || !validLifecycleCode(l.failureReason) {
+		if !validPolicyVersion(l.riskPolicyVersion) || l.version < 2 ||
+			l.journalEntryID != "" || !validLifecycleCode(l.failureReason) {
 			return ErrInvalidLifecycle
 		}
 	default:
+		return ErrInvalidLifecycle
+	}
+	if l.status != StatusCompleted && !validPolicyVersion(l.riskPolicyVersion) {
 		return ErrInvalidLifecycle
 	}
 	return nil
