@@ -72,6 +72,16 @@ DATABASE_URL='postgres://wallet:wallet_dev_only@localhost:5432/wallet?sslmode=di
   make run-risk-worker
 ```
 
+For a policy rotation, set `RISK_POLICIES_JSON` instead of the three single-policy
+variables. It is a non-empty array of immutable USD policies, for example:
+
+```bash
+RISK_POLICIES_JSON='[{"version":"risk-v1","review_amount_usd_minor":50,"decline_amount_usd_minor":100},{"version":"risk-v2","review_amount_usd_minor":75,"decline_amount_usd_minor":150}]'
+```
+
+The worker selects the policy version captured in each request, so pending v1 events
+remain reproducible while v2 is deployed.
+
 It commits a Kafka offset only after PostgreSQL atomically reserves the inbox event,
 persists the assessment, transitions the transfer, and writes `transfer.risk_assessed`
 to the outbox. A malformed event or unavailable policy is not acknowledged and is

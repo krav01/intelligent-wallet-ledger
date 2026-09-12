@@ -29,17 +29,32 @@ var (
 
 // Handler assesses pending transfers exactly once per consumed outbox event.
 type Handler struct {
-	pool   *pgxpool.Pool
-	policy riskdomain.Policy
-	now    func() time.Time
+	pool     *pgxpool.Pool
+	policies map[string]riskdomain.Policy
+	now      func() time.Time
 }
 
 // NewHandler creates a risk assessment handler with the supplied policy and clock.
 func NewHandler(pool *pgxpool.Pool, policy riskdomain.Policy, now func() time.Time) (*Handler, error) {
-	if pool == nil || policy.Version() == "" || now == nil {
+	return NewHandlerWithPolicies(pool, []riskdomain.Policy{policy}, now)
+}
+
+// NewHandlerWithPolicies creates a handler that selects an immutable policy by version.
+func NewHandlerWithPolicies(pool *pgxpool.Pool, policies []riskdomain.Policy, now func() time.Time) (*Handler, error) {
+	if pool == nil || len(policies) == 0 || now == nil {
 		return nil, ErrInvalidArgument
 	}
-	return &Handler{pool: pool, policy: policy, now: now}, nil
+	byVersion := make(map[string]riskdomain.Policy, len(policies))
+	for _, policy := range policies {
+		if policy.Version() == "" {
+			return nil, ErrInvalidArgument
+		}
+		if _, exists := byVersion[policy.Version()]; exists {
+			return nil, ErrInvalidArgument
+		}
+		byVersion[policy.Version()] = policy
+	}
+	return &Handler{pool: pool, policies: byVersion, now: now}, nil
 }
 
 // Handle persists an assessment and its resulting event in one transaction.
@@ -48,7 +63,8 @@ func (h *Handler) Handle(ctx context.Context, envelope event.Envelope) error {
 	if err != nil {
 		return err
 	}
-	if requested.RiskPolicyVersion() != h.policy.Version() {
+	policy, exists := h.policies[requested.RiskPolicyVersion()]
+	if !exists {
 		return fmt.Errorf("%w: %s", ErrUnknownPolicy, requested.RiskPolicyVersion())
 	}
 	tx, err := h.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
@@ -77,7 +93,7 @@ func (h *Handler) Handle(ctx context.Context, envelope event.Envelope) error {
 		current.RiskPolicyVersion() != requested.RiskPolicyVersion() {
 		return transferpostgres.ErrStateConflict
 	}
-	evaluation, err := h.policy.Evaluate(riskdomain.Input{Amount: current.Transfer().Amount()})
+	evaluation, err := policy.Evaluate(riskdomain.Input{Amount: current.Transfer().Amount()})
 	if err != nil {
 		return err
 	}

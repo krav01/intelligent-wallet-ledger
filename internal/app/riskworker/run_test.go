@@ -28,8 +28,19 @@ func TestConfigFromEnv(t *testing.T) {
 	}
 	if config.DatabaseURL != "postgres://wallet.example/db" || len(config.KafkaBrokers) != 2 ||
 		config.KafkaBrokers[0] != "kafka-a:9092" || config.KafkaBrokers[1] != "kafka-b:9092" ||
-		config.KafkaTopic != defaultTopic || config.KafkaGroupID != defaultGroupID || config.Policy.Version() != "risk-v1" {
+		config.KafkaTopic != defaultTopic || config.KafkaGroupID != defaultGroupID || len(config.Policies) != 1 || config.Policies[0].Version() != "risk-v1" {
 		t.Errorf("ConfigFromEnv() = %+v, want normalized configuration", config)
+	}
+}
+
+func TestConfigFromEnvLoadsPolicyRegistry(t *testing.T) {
+	t.Setenv("RISK_POLICIES_JSON", `[{"version":"risk-v1","review_amount_usd_minor":50,"decline_amount_usd_minor":100},{"version":"risk-v2","review_amount_usd_minor":75,"decline_amount_usd_minor":150}]`)
+	config, err := ConfigFromEnv()
+	if err != nil {
+		t.Fatalf("ConfigFromEnv() error = %v", err)
+	}
+	if len(config.Policies) != 2 || config.Policies[0].Version() != "risk-v1" || config.Policies[1].Version() != "risk-v2" {
+		t.Errorf("ConfigFromEnv() policies = %+v, want risk-v1 and risk-v2", config.Policies)
 	}
 }
 
