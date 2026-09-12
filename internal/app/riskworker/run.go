@@ -2,6 +2,7 @@ package riskworker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -30,12 +31,12 @@ type Config struct {
 	KafkaBrokers []string
 	KafkaTopic   string
 	KafkaGroupID string
-	Policy       riskdomain.Policy
+	Policies     []riskdomain.Policy
 }
 
 // ConfigFromEnv loads the risk-worker configuration from environment variables.
 func ConfigFromEnv() (Config, error) {
-	policy, err := policyFromEnv()
+	policies, err := policiesFromEnv()
 	if err != nil {
 		return Config{}, err
 	}
@@ -53,7 +54,7 @@ func ConfigFromEnv() (Config, error) {
 		KafkaBrokers: splitNonempty(os.Getenv("KAFKA_BROKERS")),
 		KafkaTopic:   topic,
 		KafkaGroupID: groupID,
-		Policy:       policy,
+		Policies:     policies,
 	}, nil
 }
 
@@ -86,7 +87,7 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 		return fmt.Errorf("pinging PostgreSQL: %w", err)
 	}
 
-	handler, err := NewHandler(pool, config.Policy, time.Now)
+	handler, err := NewHandlerWithPolicies(pool, config.Policies, time.Now)
 	if err != nil {
 		return fmt.Errorf("creating risk handler: %w", err)
 	}
@@ -107,7 +108,7 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 	}
 	cancelStartup()
 
-	logger.Info("risk worker started", "topic", config.KafkaTopic, "group_id", config.KafkaGroupID, "policy_version", config.Policy.Version())
+	logger.Info("risk worker started", "topic", config.KafkaTopic, "group_id", config.KafkaGroupID, "policy_count", len(config.Policies))
 	return consume(ctx, client, handler, logger)
 }
 
@@ -147,6 +148,17 @@ func handleRecord(ctx context.Context, handler interface {
 	return envelope, nil
 }
 
+func policiesFromEnv() ([]riskdomain.Policy, error) {
+	if encoded := strings.TrimSpace(os.Getenv("RISK_POLICIES_JSON")); encoded != "" {
+		return policiesFromJSON(encoded)
+	}
+	policy, err := policyFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return []riskdomain.Policy{policy}, nil
+}
+
 func policyFromEnv() (riskdomain.Policy, error) {
 	version := strings.TrimSpace(os.Getenv("RISK_POLICY_VERSION"))
 	reviewAmount, err := parsePositiveInt64("RISK_REVIEW_AMOUNT_USD_MINOR", os.Getenv("RISK_REVIEW_AMOUNT_USD_MINOR"))
@@ -173,6 +185,30 @@ func policyFromEnv() (riskdomain.Policy, error) {
 		return riskdomain.Policy{}, fmt.Errorf("creating risk policy: %w", err)
 	}
 	return policy, nil
+}
+
+func policiesFromJSON(encoded string) ([]riskdomain.Policy, error) {
+	var params []struct {
+		Version    string `json:"version"`
+		ReviewUSD  int64  `json:"review_amount_usd_minor"`
+		DeclineUSD int64  `json:"decline_amount_usd_minor"`
+	}
+	if err := json.Unmarshal([]byte(encoded), &params); err != nil || len(params) == 0 {
+		return nil, errors.New("parsing RISK_POLICIES_JSON: nonempty policy array required")
+	}
+	currency, err := ledgerdomain.ParseCurrency("USD")
+	if err != nil {
+		return nil, fmt.Errorf("parsing USD currency: %w", err)
+	}
+	policies := make([]riskdomain.Policy, 0, len(params))
+	for _, param := range params {
+		policy, err := riskdomain.NewPolicy(riskdomain.PolicyParams{Version: param.Version, Thresholds: []riskdomain.Threshold{{Currency: currency, ReviewAmountMinor: param.ReviewUSD, DeclineAmountMinor: param.DeclineUSD}}})
+		if err != nil {
+			return nil, fmt.Errorf("creating risk policy: %w", err)
+		}
+		policies = append(policies, policy)
+	}
+	return policies, nil
 }
 
 func parsePositiveInt64(name, value string) (int64, error) {
