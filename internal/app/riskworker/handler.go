@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/krav01/intelligent-wallet-ledger/internal/event"
 	inboxpostgres "github.com/krav01/intelligent-wallet-ledger/internal/inbox/postgres"
@@ -104,9 +103,4 @@ func transition(lifecycle transferdomain.Lifecycle, decision riskdomain.Decision
 	default:
 		return transferdomain.Lifecycle{}, ErrInvalidArgument
 	}
-}
-
-func retryable(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && (pgErr.Code == "40001" || pgErr.Code == "40P01")
 }
