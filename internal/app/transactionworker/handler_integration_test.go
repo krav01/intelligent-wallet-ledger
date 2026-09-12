@@ -234,6 +234,9 @@ func (f *integrationFixture) cleanup(t testing.TB) {
 		if _, err := f.pool.Exec(ctx, `DELETE FROM transfers WHERE id = ANY($1::uuid[])`, f.transferIDs); err != nil {
 			t.Errorf("cleaning transfers: %v", err)
 		}
+		if _, err := f.pool.Exec(ctx, `DELETE FROM postings WHERE journal_entry_id = ANY($1::uuid[])`, f.transferIDs); err != nil {
+			t.Errorf("cleaning postings: %v", err)
+		}
 		if _, err := f.pool.Exec(ctx, `DELETE FROM journal_entries WHERE id = ANY($1::uuid[])`, f.transferIDs); err != nil {
 			t.Errorf("cleaning journal entries: %v", err)
 		}
