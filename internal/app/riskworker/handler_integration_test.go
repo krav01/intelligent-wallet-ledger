@@ -34,6 +34,7 @@ func TestHandlerHandleDeduplicatesRedelivery(t *testing.T) {
 
 	fixture.assertLifecycle(t, lifecycle.Transfer().ID(), "review_required", 2)
 	fixture.assertCount(t, `SELECT count(*) FROM transfer_risk_assessments WHERE transfer_id = $1`, lifecycle.Transfer().ID(), 1)
+	fixture.assertCount(t, `SELECT count(*) FROM transfer_review_cases WHERE transfer_id = $1`, lifecycle.Transfer().ID(), 1)
 	fixture.assertCount(t, `SELECT count(*) FROM outbox_events WHERE aggregate_id = $1 AND event_type = 'transfer.risk_assessed'`, lifecycle.Transfer().ID(), 1)
 	fixture.assertCount(t, `SELECT count(*) FROM consumer_inbox WHERE consumer_name = 'risk-worker.v1' AND event_id = $1`, envelope.EventID(), 1)
 	fixture.assertBalance(t, lifecycle.Transfer().SourceAccountID(), 0, 0)
@@ -70,6 +71,19 @@ func TestHandlerHandleCapturesVelocityOnceAcrossRedelivery(t *testing.T) {
 		t.Errorf("captured input = %+v, want count 3 and non-degraded observation", input)
 	}
 	fixture.assertLifecycle(t, lifecycle.Transfer().ID(), "review_required", 2)
+	fixture.assertCount(t, `SELECT count(*) FROM transfer_review_cases WHERE transfer_id = $1`, lifecycle.Transfer().ID(), 1)
+}
+
+func TestHandlerHandleCreatesNoReviewCaseForApproval(t *testing.T) {
+	fixture := newIntegrationFixture(t)
+	lifecycle, envelope := fixture.createPendingRequested(t, 40)
+
+	if err := fixture.handler(t).Handle(t.Context(), envelope); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+
+	fixture.assertLifecycle(t, lifecycle.Transfer().ID(), "approved", 2)
+	fixture.assertCount(t, `SELECT count(*) FROM transfer_review_cases WHERE transfer_id = $1`, lifecycle.Transfer().ID(), 0)
 }
 
 func TestHandlerHandleRollsBackMismatchedRequestedTransfer(t *testing.T) {
@@ -93,6 +107,7 @@ func TestHandlerHandleRollsBackMismatchedRequestedTransfer(t *testing.T) {
 
 	fixture.assertLifecycle(t, lifecycle.Transfer().ID(), "pending_risk", 1)
 	fixture.assertCount(t, `SELECT count(*) FROM transfer_risk_assessments WHERE transfer_id = $1`, lifecycle.Transfer().ID(), 0)
+	fixture.assertCount(t, `SELECT count(*) FROM transfer_review_cases WHERE transfer_id = $1`, lifecycle.Transfer().ID(), 0)
 	fixture.assertCount(t, `SELECT count(*) FROM outbox_events WHERE aggregate_id = $1 AND event_type = 'transfer.risk_assessed'`, lifecycle.Transfer().ID(), 0)
 	fixture.assertCount(t, `SELECT count(*) FROM consumer_inbox WHERE consumer_name = 'risk-worker.v1' AND event_id = $1`, envelope.EventID(), 0)
 }
@@ -342,6 +357,9 @@ func (f *integrationFixture) cleanup(t testing.TB) {
 	if len(f.transferIDs) > 0 {
 		if _, err := f.pool.Exec(ctx, `DELETE FROM outbox_events WHERE aggregate_id = ANY($1::uuid[])`, f.transferIDs); err != nil {
 			t.Errorf("cleaning transfer outbox events: %v", err)
+		}
+		if _, err := f.pool.Exec(ctx, `DELETE FROM transfer_review_cases WHERE transfer_id = ANY($1::uuid[])`, f.transferIDs); err != nil {
+			t.Errorf("cleaning transfer review cases: %v", err)
 		}
 		if _, err := f.pool.Exec(ctx, `DELETE FROM transfer_risk_assessments WHERE transfer_id = ANY($1::uuid[])`, f.transferIDs); err != nil {
 			t.Errorf("cleaning risk assessments: %v", err)

@@ -58,6 +58,14 @@ INSERT INTO transfer_risk_assessments (
     assessed_at
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+
+	insertReviewCaseQuery = `
+INSERT INTO transfer_review_cases (
+    transfer_id,
+    assessment_lifecycle_version,
+    opened_at
+)
+VALUES ($1, $2, $3)`
 )
 
 // LoadLifecycleForUpdateTx returns one durable lifecycle while holding its row lock.
@@ -154,6 +162,17 @@ func StoreRiskAssessmentTx(
 		assessedAt.UTC(),
 	); err != nil {
 		return fmt.Errorf("storing risk assessment: %w", err)
+	}
+	if next.Status() == transferdomain.StatusReviewRequired {
+		if _, err := tx.Exec(
+			ctx,
+			insertReviewCaseQuery,
+			previous.Transfer().ID(),
+			next.Version(),
+			assessedAt.UTC(),
+		); err != nil {
+			return fmt.Errorf("storing transfer review case: %w", err)
+		}
 	}
 
 	return nil

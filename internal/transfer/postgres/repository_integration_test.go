@@ -366,6 +366,21 @@ func TestStoreRiskAssessmentTx(t *testing.T) {
 	if status != "review_required" || version != 2 || score != 600 {
 		t.Errorf("persisted risk assessment = (%q, %d, %d), want review_required version 2 score 600", status, version, score)
 	}
+	var caseVersion int64
+	var caseStatus string
+	var openedAt time.Time
+	if err := fixture.pool.QueryRow(
+		t.Context(),
+		`SELECT assessment_lifecycle_version, status, opened_at
+		 FROM transfer_review_cases
+		 WHERE transfer_id = $1`,
+		pending.ID(),
+	).Scan(&caseVersion, &caseStatus, &openedAt); err != nil {
+		t.Fatalf("selecting persisted review case: %v", err)
+	}
+	if caseVersion != 2 || caseStatus != "open" || !openedAt.Equal(pending.RequestedAt()) {
+		t.Errorf("persisted review case = (%d, %q, %s), want (2, open, %s)", caseVersion, caseStatus, openedAt, pending.RequestedAt())
+	}
 	var storedInput struct {
 		AmountMinor           int64  `json:"amount_minor"`
 		Currency              string `json:"currency"`
@@ -840,6 +855,16 @@ func (f *fixture) cleanup(t testing.TB) {
 		f.accountIDs,
 	); err != nil {
 		t.Errorf("cleaning transfer outbox events: %v", err)
+	}
+	if _, err := f.pool.Exec(
+		ctx,
+		`DELETE FROM transfer_review_cases
+         WHERE transfer_id IN (
+               SELECT id FROM transfers WHERE source_account_id = ANY($1::uuid[])
+         )`,
+		f.accountIDs,
+	); err != nil {
+		t.Errorf("cleaning transfer review cases: %v", err)
 	}
 	if _, err := f.pool.Exec(
 		ctx,

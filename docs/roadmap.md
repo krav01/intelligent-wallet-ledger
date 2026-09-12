@@ -21,7 +21,8 @@ is small and coherent.
 	- [x] Reviewed persistence migration, workers, event contracts, and worker topology demo.
 8. Redis velocity signals, manual-review cases, and explicit degraded-mode policy.
 	- [x] Captured velocity input, Redis sliding-window observation, and fail-safe review.
-	- [ ] Durable review cases and analyst decision authorization.
+	- [x] Durable review cases linked atomically to review-required assessments.
+	- [ ] Analyst decision authorization.
 9. AI Investigator port, mock provider, privacy boundary, and provider-failure tests.
 10. Reconciliation, audit trail, RBAC, and API abuse protection.
 11. OpenTelemetry, Prometheus/Grafana, failure injection, and recovery tests.
