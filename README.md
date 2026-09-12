@@ -87,6 +87,17 @@ persists the assessment, transitions the transfer, and writes `transfer.risk_ass
 to the outbox. A malformed event or unavailable policy is not acknowledged and is
 delivered again for operator recovery.
 
+Run the complete worker topology and verify the terminal posting transitions:
+
+```bash
+make demo-transfer
+```
+
+The target migrates PostgreSQL, starts the outbox publisher plus both Kafka workers,
+and runs tagged integration tests for the approved posting and insufficient-funds
+failure paths. It does not claim an HTTP transfer command yet; that API surface is a
+separate delivery slice.
+
 ## Architecture
 
 The repository is a modular Go system with small deployable applications. Bounded
@@ -115,7 +126,7 @@ See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and
 
 ## Current status
 
-Roadmap slices 1 through 6 are implemented: repository foundation, immutable money
+Roadmap slices 1 through 7 are implemented: repository foundation, immutable money
 value objects, PostgreSQL-backed wallets, the transactional double-entry ledger, and
 requester-scoped idempotent customer transfers.
 Ledger posting locks accounts in stable order and atomically stores entries, postings,
@@ -128,6 +139,8 @@ atomicity, replay, authorization, reversal, overflow, outbox leasing/fencing,
 consumer deduplication, and concurrency boundaries. A dedicated process publishes
 the durable outbox to Kafka with stable aggregate keys and all-ISR acknowledgements;
 the integration suite proves safe redelivery after a lost completion update.
+Risk and transaction workers now advance accepted transfers through deterministic
+assessment to an atomic ledger posting or an explicit insufficient-funds failure.
 
 ## Development
 

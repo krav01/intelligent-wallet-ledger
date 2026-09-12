@@ -45,6 +45,37 @@ services:
       kafka:
         condition: service_healthy
 
+  risk-worker:
+    build: .
+    entrypoint: ["risk-worker"]
+    restart: on-failure
+    environment:
+      DATABASE_URL: postgres://wallet:wallet_dev_only@postgres:5432/wallet?sslmode=disable
+      KAFKA_BROKERS: kafka:19092
+      KAFKA_TOPIC: wallet.events.v1
+      RISK_POLICY_VERSION: risk-v1
+      RISK_REVIEW_AMOUNT_USD_MINOR: "50"
+      RISK_DECLINE_AMOUNT_USD_MINOR: "100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  transaction-worker:
+    build: .
+    entrypoint: ["transaction-worker"]
+    restart: on-failure
+    environment:
+      DATABASE_URL: postgres://wallet:wallet_dev_only@postgres:5432/wallet?sslmode=disable
+      KAFKA_BROKERS: kafka:19092
+      KAFKA_TOPIC: wallet.events.v1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
   postgres:
     image: postgres:18.6-alpine3.23
     environment:

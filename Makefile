@@ -4,7 +4,7 @@ RISK_WORKER_BINARY := bin/risk-worker
 TRANSACTION_WORKER_BINARY := bin/transaction-worker
 GO ?= go
 
-.PHONY: build clean demo-outbox fmt help migrate-down migrate-up run run-publisher run-risk-worker run-transaction-worker test test-integration test-race vet vuln
+.PHONY: build clean demo-outbox demo-transfer fmt help migrate-down migrate-up run run-publisher run-risk-worker run-transaction-worker test test-integration test-race vet vuln
 
 ## build: Build the wallet API.
 build:
@@ -25,6 +25,15 @@ demo-outbox:
 		KAFKA_BROKERS='localhost:9092' \
 		$(GO) test -count=1 -v -tags=integration \
 		-run '^TestPublisherRedeliveryKeepsEventIdentityAndConsumerEffectOnce$$' ./internal/outbox
+
+## demo-transfer: Start the worker topology and verify approved and failed posting transitions.
+demo-transfer:
+	docker compose up -d postgres kafka
+	$(MAKE) migrate-up
+	docker compose up -d --build outbox-publisher risk-worker transaction-worker
+	TEST_DATABASE_URL='postgres://wallet:wallet_dev_only@localhost:5432/wallet?sslmode=disable' \
+		$(GO) test -count=1 -v -tags=integration \
+		-run '^TestHandlerHandle(PostsApprovedTransferOnce|FailsInsufficientFunds)$$' ./internal/app/transactionworker
 
 ## fmt: Format all Go packages.
 fmt:
