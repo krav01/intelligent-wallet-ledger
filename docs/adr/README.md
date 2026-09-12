@@ -14,3 +14,4 @@ history.
 - [ADR-0008: Asynchronous transfer lifecycle and deterministic risk assessment](0008-asynchronous-transfer-risk-lifecycle.md)
 - [ADR-0009: Captured velocity input and fail-safe risk review](0009-captured-velocity-risk-input.md)
 - [ADR-0010: Redis source-account velocity observations](0010-redis-source-account-velocity.md)
+- [ADR-0011: Durable transfer review cases](0011-durable-transfer-review-cases.md)
