@@ -64,6 +64,24 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $1)
 ON CONFLICT (requester_id, idempotency_key) DO NOTHING
 RETURNING id::text`
 
+	insertPendingTransferQuery = `
+INSERT INTO transfers (
+    id,
+    requester_id,
+    idempotency_key,
+    source_account_id,
+    destination_account_id,
+    currency,
+    amount_minor,
+    requested_at,
+    status,
+    state_version,
+    risk_policy_version
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending_risk', 1, $9)
+ON CONFLICT (requester_id, idempotency_key) DO NOTHING
+RETURNING id::text`
+
 	selectTransferByKeyQuery = `
 SELECT
     id::text,
@@ -74,6 +92,24 @@ SELECT
     currency,
     amount_minor,
     requested_at
+FROM transfers
+WHERE requester_id = $1 AND idempotency_key = $2`
+
+	selectLifecycleByKeyQuery = `
+SELECT
+    id::text,
+    requester_id::text,
+    idempotency_key,
+    source_account_id::text,
+    destination_account_id::text,
+    currency,
+    amount_minor,
+    requested_at,
+    status,
+    state_version,
+    risk_policy_version,
+    journal_entry_id::text,
+    failure_reason
 FROM transfers
 WHERE requester_id = $1 AND idempotency_key = $2`
 
@@ -137,6 +173,40 @@ func (r *Repository) Create(
 	return transferdomain.Transfer{}, fmt.Errorf("%w: %w", ErrSerializationFailure, lastErr)
 }
 
+// CreatePending accepts a transfer for deterministic risk assessment without moving money.
+// It stores the pending lifecycle and transfer.requested event atomically and is idempotent
+// within the requester's key namespace.
+func (r *Repository) CreatePending(
+	ctx context.Context,
+	lifecycle transferdomain.Lifecycle,
+) (transferdomain.Lifecycle, error) {
+	prepared, err := preparePendingTransfer(lifecycle)
+	if err != nil {
+		return transferdomain.Lifecycle{}, err
+	}
+
+	var lastErr error
+	for attempt := range maxTransactionAttempts {
+		if err := ctx.Err(); err != nil {
+			return transferdomain.Lifecycle{}, fmt.Errorf("creating pending transfer: %w", err)
+		}
+
+		created, createErr := r.createPendingOnce(ctx, prepared)
+		if createErr == nil {
+			return created, nil
+		}
+		lastErr = createErr
+		if !isRetryableTransaction(createErr) {
+			return transferdomain.Lifecycle{}, classifyCreateError(createErr)
+		}
+		if attempt == maxTransactionAttempts-1 {
+			break
+		}
+	}
+
+	return transferdomain.Lifecycle{}, fmt.Errorf("%w: %w", ErrSerializationFailure, lastErr)
+}
+
 type preparedTransfer struct {
 	transfer       transferdomain.Transfer
 	id             pgtype.UUID
@@ -145,6 +215,15 @@ type preparedTransfer struct {
 	destinationID  pgtype.UUID
 	entry          ledgerdomain.JournalEntry
 	completedEvent event.Draft
+}
+
+type preparedPendingTransfer struct {
+	lifecycle      transferdomain.Lifecycle
+	id             pgtype.UUID
+	requesterID    pgtype.UUID
+	sourceID       pgtype.UUID
+	destinationID  pgtype.UUID
+	requestedEvent event.Draft
 }
 
 type accountRecord struct {
@@ -206,6 +285,54 @@ func prepareTransfer(transfer transferdomain.Transfer) (preparedTransfer, error)
 	}, nil
 }
 
+func preparePendingTransfer(lifecycle transferdomain.Lifecycle) (preparedPendingTransfer, error) {
+	validated, err := transferdomain.NewLifecycle(transferdomain.LifecycleParams{
+		Transfer:          lifecycle.Transfer(),
+		Status:            lifecycle.Status(),
+		Version:           lifecycle.Version(),
+		RiskPolicyVersion: lifecycle.RiskPolicyVersion(),
+		JournalEntryID:    lifecycle.JournalEntryID(),
+		FailureReason:     lifecycle.FailureReason(),
+	})
+	if err != nil {
+		return preparedPendingTransfer{}, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
+	}
+	if validated.Status() != transferdomain.StatusPendingRisk {
+		return preparedPendingTransfer{}, fmt.Errorf("%w: transfer must be pending risk", ErrInvalidArgument)
+	}
+
+	transfer := validated.Transfer()
+	id, err := parseUUID(transfer.ID())
+	if err != nil {
+		return preparedPendingTransfer{}, fmt.Errorf("%w: transfer ID: %w", ErrInvalidArgument, err)
+	}
+	requesterID, err := parseUUID(transfer.RequesterID())
+	if err != nil {
+		return preparedPendingTransfer{}, fmt.Errorf("%w: requester ID: %w", ErrInvalidArgument, err)
+	}
+	sourceID, err := parseUUID(transfer.SourceAccountID())
+	if err != nil {
+		return preparedPendingTransfer{}, fmt.Errorf("%w: source account ID: %w", ErrInvalidArgument, err)
+	}
+	destinationID, err := parseUUID(transfer.DestinationAccountID())
+	if err != nil {
+		return preparedPendingTransfer{}, fmt.Errorf("%w: destination account ID: %w", ErrInvalidArgument, err)
+	}
+	requestedEvent, err := transferevents.Requested(validated)
+	if err != nil {
+		return preparedPendingTransfer{}, fmt.Errorf("%w: requested event: %w", ErrInvalidArgument, err)
+	}
+
+	return preparedPendingTransfer{
+		lifecycle:      validated,
+		id:             id,
+		requesterID:    requesterID,
+		sourceID:       sourceID,
+		destinationID:  destinationID,
+		requestedEvent: requestedEvent,
+	}, nil
+}
+
 func (r *Repository) createOnce(
 	ctx context.Context,
 	prepared preparedTransfer,
@@ -251,6 +378,48 @@ func (r *Repository) createOnce(
 	return prepared.transfer, nil
 }
 
+func (r *Repository) createPendingOnce(
+	ctx context.Context,
+	prepared preparedPendingTransfer,
+) (created transferdomain.Lifecycle, err error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return transferdomain.Lifecycle{}, fmt.Errorf("beginning pending transfer transaction: %w", err)
+	}
+	defer finishTransaction(ctx, tx, &err)
+
+	inserted, err := reservePendingTransfer(ctx, tx, prepared)
+	if err != nil {
+		return transferdomain.Lifecycle{}, err
+	}
+	if !inserted {
+		stored, selectErr := selectLifecycleByKey(ctx, tx, prepared)
+		if selectErr != nil {
+			return transferdomain.Lifecycle{}, selectErr
+		}
+		if !sameIntent(stored.Transfer(), prepared.lifecycle.Transfer()) {
+			return transferdomain.Lifecycle{}, ErrIdempotencyConflict
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return transferdomain.Lifecycle{}, fmt.Errorf("committing pending transfer replay: %w", err)
+		}
+
+		return stored, nil
+	}
+
+	if err := authorizePendingAccounts(ctx, tx, prepared); err != nil {
+		return transferdomain.Lifecycle{}, err
+	}
+	if _, err := outboxpostgres.AddTx(ctx, tx, prepared.requestedEvent); err != nil {
+		return transferdomain.Lifecycle{}, fmt.Errorf("storing requested transfer event: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return transferdomain.Lifecycle{}, fmt.Errorf("committing pending transfer transaction: %w", err)
+	}
+
+	return prepared.lifecycle, nil
+}
+
 func reserveTransfer(ctx context.Context, tx pgx.Tx, prepared preparedTransfer) (bool, error) {
 	var id string
 	err := tx.QueryRow(
@@ -270,6 +439,31 @@ func reserveTransfer(ctx context.Context, tx pgx.Tx, prepared preparedTransfer) 
 	}
 	if err != nil {
 		return false, fmt.Errorf("reserving transfer key: %w", err)
+	}
+
+	return true, nil
+}
+
+func reservePendingTransfer(ctx context.Context, tx pgx.Tx, prepared preparedPendingTransfer) (bool, error) {
+	var id string
+	err := tx.QueryRow(
+		ctx,
+		insertPendingTransferQuery,
+		prepared.id,
+		prepared.requesterID,
+		prepared.lifecycle.Transfer().IdempotencyKey(),
+		prepared.sourceID,
+		prepared.destinationID,
+		prepared.lifecycle.Transfer().Amount().Currency().String(),
+		prepared.lifecycle.Transfer().Amount().MinorUnits(),
+		prepared.lifecycle.Transfer().RequestedAt(),
+		prepared.lifecycle.RiskPolicyVersion(),
+	).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("reserving pending transfer key: %w", err)
 	}
 
 	return true, nil
@@ -321,8 +515,74 @@ func selectTransferByKey(
 	return stored, nil
 }
 
+func selectLifecycleByKey(
+	ctx context.Context,
+	tx pgx.Tx,
+	prepared preparedPendingTransfer,
+) (transferdomain.Lifecycle, error) {
+	var record lifecycleRecord
+	err := tx.QueryRow(
+		ctx,
+		selectLifecycleByKeyQuery,
+		prepared.requesterID,
+		prepared.lifecycle.Transfer().IdempotencyKey(),
+	).Scan(
+		&record.id,
+		&record.requesterID,
+		&record.idempotencyKey,
+		&record.sourceAccountID,
+		&record.destinationAccountID,
+		&record.currencyCode,
+		&record.amountMinor,
+		&record.requestedAt,
+		&record.status,
+		&record.version,
+		&record.riskPolicyVersion,
+		&record.journalEntryID,
+		&record.failureReason,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return transferdomain.Lifecycle{}, retryableReplayError{}
+	}
+	if err != nil {
+		return transferdomain.Lifecycle{}, fmt.Errorf("selecting pending transfer replay: %w", err)
+	}
+
+	stored, err := record.lifecycle()
+	if err != nil {
+		return transferdomain.Lifecycle{}, err
+	}
+	return stored, nil
+}
+
+func authorizePendingAccounts(ctx context.Context, tx pgx.Tx, prepared preparedPendingTransfer) error {
+	return authorizeTransferAccounts(
+		ctx,
+		tx,
+		prepared.lifecycle.Transfer(),
+		prepared.sourceID,
+		prepared.destinationID,
+	)
+}
+
 func authorizeAccounts(ctx context.Context, tx pgx.Tx, prepared preparedTransfer) error {
-	rows, err := tx.Query(ctx, selectAccountsQuery, []pgtype.UUID{prepared.sourceID, prepared.destinationID})
+	return authorizeTransferAccounts(
+		ctx,
+		tx,
+		prepared.transfer,
+		prepared.sourceID,
+		prepared.destinationID,
+	)
+}
+
+func authorizeTransferAccounts(
+	ctx context.Context,
+	tx pgx.Tx,
+	transfer transferdomain.Transfer,
+	sourceID pgtype.UUID,
+	destinationID pgtype.UUID,
+) error {
+	rows, err := tx.Query(ctx, selectAccountsQuery, []pgtype.UUID{sourceID, destinationID})
 	if err != nil {
 		return fmt.Errorf("selecting transfer accounts: %w", err)
 	}
@@ -346,11 +606,11 @@ func authorizeAccounts(ctx context.Context, tx pgx.Tx, prepared preparedTransfer
 		return fmt.Errorf("iterating transfer accounts: %w", err)
 	}
 
-	source, sourceExists := records[prepared.transfer.SourceAccountID()]
-	if !sourceExists || source.ownerID != prepared.transfer.RequesterID() {
+	source, sourceExists := records[transfer.SourceAccountID()]
+	if !sourceExists || source.ownerID != transfer.RequesterID() {
 		return ErrUnauthorized
 	}
-	destination, destinationExists := records[prepared.transfer.DestinationAccountID()]
+	destination, destinationExists := records[transfer.DestinationAccountID()]
 	if !destinationExists {
 		return ErrNotFound
 	}
@@ -361,7 +621,7 @@ func authorizeAccounts(ctx context.Context, tx pgx.Tx, prepared preparedTransfer
 		if record.accountType != "customer" {
 			return fmt.Errorf("%w: account %s", ErrNonCustomerAccount, record.id)
 		}
-		if record.currency != prepared.transfer.Amount().Currency().String() {
+		if record.currency != transfer.Amount().Currency().String() {
 			return fmt.Errorf("%w: account %s", ErrCurrencyMismatch, record.id)
 		}
 	}
