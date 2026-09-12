@@ -57,6 +57,33 @@ func TestCompletedRejectsZeroTransfer(t *testing.T) {
 	}
 }
 
+func TestCompletedLifecycle(t *testing.T) {
+	t.Parallel()
+	pending, err := transferdomain.NewPendingLifecycle(mustTransfer(t), "risk-v1")
+	if err != nil {
+		t.Fatalf("NewPendingLifecycle() error = %v", err)
+	}
+	approved, err := pending.Approve()
+	if err != nil {
+		t.Fatalf("Approve() error = %v", err)
+	}
+	completed, err := approved.Complete()
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	completedAt := time.Date(2026, time.September, 12, 12, 0, 0, 0, time.UTC)
+	causationID := "55555555-5555-4555-8555-555555555555"
+
+	draft, err := transferevents.CompletedLifecycle(completed, completedAt, causationID)
+	if err != nil {
+		t.Fatalf("CompletedLifecycle() error = %v", err)
+	}
+	if draft.AggregateVersion() != completed.Version() || draft.CausationID() != causationID ||
+		!draft.OccurredAt().Equal(completedAt) {
+		t.Errorf("CompletedLifecycle() metadata does not preserve lifecycle completion")
+	}
+}
+
 func mustTransfer(t testing.TB) transferdomain.Transfer {
 	t.Helper()
 	currency, err := ledgerdomain.ParseCurrency("USD")

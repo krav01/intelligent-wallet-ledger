@@ -60,3 +60,53 @@ func Completed(transfer transferdomain.Transfer) (event.Draft, error) {
 
 	return draft, nil
 }
+
+// CompletedLifecycle creates the version 1 event for a lifecycle completed by an asynchronous worker.
+func CompletedLifecycle(
+	lifecycle transferdomain.Lifecycle,
+	completedAt time.Time,
+	causationID string,
+) (event.Draft, error) {
+	if lifecycle.Status() != transferdomain.StatusCompleted || causationID == "" {
+		return event.Draft{}, fmt.Errorf("creating completed lifecycle event: %w", transferdomain.ErrInvalidLifecycle)
+	}
+
+	transfer := lifecycle.Transfer()
+	payload, err := json.Marshal(struct {
+		TransferID           string `json:"transfer_id"`
+		RequesterID          string `json:"requester_id"`
+		SourceAccountID      string `json:"source_account_id"`
+		DestinationAccountID string `json:"destination_account_id"`
+		Currency             string `json:"currency"`
+		AmountMinor          int64  `json:"amount_minor"`
+		RequestedAt          string `json:"requested_at"`
+	}{
+		TransferID:           transfer.ID(),
+		RequesterID:          transfer.RequesterID(),
+		SourceAccountID:      transfer.SourceAccountID(),
+		DestinationAccountID: transfer.DestinationAccountID(),
+		Currency:             transfer.Amount().Currency().String(),
+		AmountMinor:          transfer.Amount().MinorUnits(),
+		RequestedAt:          transfer.RequestedAt().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		return event.Draft{}, fmt.Errorf("encoding completed transfer payload: %w", err)
+	}
+
+	draft, err := event.NewDraft(event.DraftParams{
+		EventType:        CompletedType,
+		EventVersion:     CompletedVersion,
+		AggregateType:    "transfer",
+		AggregateID:      transfer.ID(),
+		AggregateVersion: lifecycle.Version(),
+		CorrelationID:    transfer.ID(),
+		CausationID:      causationID,
+		OccurredAt:       completedAt,
+		Payload:          payload,
+	})
+	if err != nil {
+		return event.Draft{}, fmt.Errorf("creating completed transfer envelope: %w", err)
+	}
+
+	return draft, nil
+}

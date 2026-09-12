@@ -1,8 +1,11 @@
 package events
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/krav01/intelligent-wallet-ledger/internal/event"
@@ -16,6 +19,64 @@ const (
 	// RiskAssessedVersion is the current transfer-risk-result payload version.
 	RiskAssessedVersion int16 = 1
 )
+
+// RiskAssessment is the posting-relevant, immutable result of a risk event.
+type RiskAssessment struct {
+	transferID        string
+	riskPolicyVersion string
+	decision          riskdomain.Decision
+}
+
+// TransferID returns the assessed transfer identity.
+func (a RiskAssessment) TransferID() string { return a.transferID }
+
+// RiskPolicyVersion returns the immutable policy used for the assessment.
+func (a RiskAssessment) RiskPolicyVersion() string { return a.riskPolicyVersion }
+
+// Decision returns the risk decision that controls whether posting may proceed.
+func (a RiskAssessment) Decision() riskdomain.Decision { return a.decision }
+
+// ParseRiskAssessed strictly decodes a version 1 transfer.risk_assessed envelope.
+func ParseRiskAssessed(envelope event.Envelope) (RiskAssessment, error) {
+	if envelope.EventType() != RiskAssessedType || envelope.EventVersion() != RiskAssessedVersion ||
+		envelope.AggregateType() != "transfer" || envelope.AggregateVersion() != 2 ||
+		envelope.CausationID() == "" {
+		return RiskAssessment{}, fmt.Errorf("parsing risk assessed transfer: %w", event.ErrInvalidEnvelope)
+	}
+
+	var payload struct {
+		TransferID        string `json:"transfer_id"`
+		RiskPolicyVersion string `json:"risk_policy_version"`
+		Score             int    `json:"score"`
+		Decision          string `json:"decision"`
+		Signals           []struct {
+			Code         string `json:"code"`
+			Contribution int    `json:"contribution"`
+		} `json:"signals"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(envelope.Payload()))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil {
+		return RiskAssessment{}, fmt.Errorf("parsing risk assessed payload: %w", event.ErrInvalidEnvelope)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return RiskAssessment{}, fmt.Errorf("parsing risk assessed payload: %w", event.ErrInvalidEnvelope)
+	}
+	if payload.TransferID != envelope.AggregateID() || envelope.CorrelationID() != payload.TransferID ||
+		payload.RiskPolicyVersion == "" || payload.Score < 0 || payload.Score > 1000 {
+		return RiskAssessment{}, fmt.Errorf("parsing risk assessed payload: %w", event.ErrInvalidEnvelope)
+	}
+
+	decision, ok := riskDecision(payload.Decision)
+	if !ok {
+		return RiskAssessment{}, fmt.Errorf("parsing risk assessed decision: %w", event.ErrInvalidEnvelope)
+	}
+	return RiskAssessment{
+		transferID:        payload.TransferID,
+		riskPolicyVersion: payload.RiskPolicyVersion,
+		decision:          decision,
+	}, nil
+}
 
 // RiskAssessed creates the version 1 event for a persisted deterministic risk decision.
 func RiskAssessed(
@@ -88,5 +149,18 @@ func matchesRiskDecision(status transferdomain.Status, decision riskdomain.Decis
 		return status == transferdomain.StatusDeclined
 	default:
 		return false
+	}
+}
+
+func riskDecision(value string) (riskdomain.Decision, bool) {
+	switch value {
+	case riskdomain.DecisionApprove.String():
+		return riskdomain.DecisionApprove, true
+	case riskdomain.DecisionReview.String():
+		return riskdomain.DecisionReview, true
+	case riskdomain.DecisionDecline.String():
+		return riskdomain.DecisionDecline, true
+	default:
+		return riskdomain.DecisionUnknown, false
 	}
 }
