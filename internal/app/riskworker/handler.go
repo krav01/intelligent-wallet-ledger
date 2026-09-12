@@ -27,12 +27,14 @@ var (
 	ErrUnknownPolicy = errors.New("risk worker: unknown policy version")
 )
 
+// Handler assesses pending transfers exactly once per consumed outbox event.
 type Handler struct {
 	pool   *pgxpool.Pool
 	policy riskdomain.Policy
 	now    func() time.Time
 }
 
+// NewHandler creates a risk assessment handler with the supplied policy and clock.
 func NewHandler(pool *pgxpool.Pool, policy riskdomain.Policy, now func() time.Time) (*Handler, error) {
 	if pool == nil || policy.Version() == "" || now == nil {
 		return nil, ErrInvalidArgument
@@ -40,6 +42,7 @@ func NewHandler(pool *pgxpool.Pool, policy riskdomain.Policy, now func() time.Ti
 	return &Handler{pool: pool, policy: policy, now: now}, nil
 }
 
+// Handle persists an assessment and its resulting event in one transaction.
 func (h *Handler) Handle(ctx context.Context, envelope event.Envelope) error {
 	requested, err := transferevents.ParseRequested(envelope)
 	if err != nil {
