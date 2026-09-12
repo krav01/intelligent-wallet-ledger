@@ -15,6 +15,7 @@ const (
 	maxScore              = 1000
 	reviewScore           = 600
 	missingPolicyScore    = 500
+	velocityReviewScore   = 700
 )
 
 var (
@@ -62,13 +63,21 @@ const (
 	SignalAmountDeclineThreshold SignalCode = "amount_decline_threshold"
 	// SignalCurrencyPolicyMissing indicates no explicit policy exists for a currency.
 	SignalCurrencyPolicyMissing SignalCode = "currency_policy_missing"
+	// SignalVelocityUnavailable indicates the captured velocity observation was unavailable.
+	SignalVelocityUnavailable SignalCode = "velocity_unavailable"
+	// SignalVelocityReviewThreshold indicates the captured transfer count requires review.
+	SignalVelocityReviewThreshold SignalCode = "velocity_review_threshold"
 )
 
-// Threshold defines deterministic amount thresholds for one currency.
+// Threshold defines deterministic risk thresholds for one currency.
 type Threshold struct {
-	Currency           ledgerdomain.Currency
-	ReviewAmountMinor  int64
+	Currency ledgerdomain.Currency
+	// ReviewAmountMinor is the inclusive amount threshold requiring manual review.
+	ReviewAmountMinor int64
+	// DeclineAmountMinor is the inclusive amount threshold declining a transfer.
 	DeclineAmountMinor int64
+	// VelocityReviewTransferCount is the inclusive captured count threshold requiring review.
+	VelocityReviewTransferCount int
 }
 
 // PolicyParams contains validated, versioned deterministic risk thresholds.
@@ -86,6 +95,10 @@ type Policy struct {
 // Input is the immutable transfer information required for one evaluation.
 type Input struct {
 	Amount ledgerdomain.Money
+	// VelocityTransferCount is the non-negative count from a captured observation window.
+	VelocityTransferCount int
+	// VelocityDegraded reports that the captured velocity observation was unavailable.
+	VelocityDegraded bool
 }
 
 // Signal records a stable rule code and its integer score contribution.
@@ -123,7 +136,7 @@ func NewPolicy(params PolicyParams) (Policy, error) {
 		if threshold.Currency.String() == "" {
 			return Policy{}, fmt.Errorf("%w: threshold currency", ErrInvalidPolicy)
 		}
-		if threshold.ReviewAmountMinor <= 0 || threshold.DeclineAmountMinor < threshold.ReviewAmountMinor {
+		if threshold.ReviewAmountMinor <= 0 || threshold.DeclineAmountMinor < threshold.ReviewAmountMinor || threshold.VelocityReviewTransferCount < 0 {
 			return Policy{}, fmt.Errorf("%w: threshold amounts", ErrInvalidPolicy)
 		}
 		if _, exists := thresholds[threshold.Currency]; exists {
@@ -143,12 +156,15 @@ func (p Policy) Evaluate(input Input) (Evaluation, error) {
 	if err := p.validate(); err != nil {
 		return Evaluation{}, err
 	}
-	if input.Amount.Currency().String() == "" || input.Amount.MinorUnits() <= 0 {
+	if input.Amount.Currency().String() == "" || input.Amount.MinorUnits() <= 0 || input.VelocityTransferCount < 0 {
 		return Evaluation{}, fmt.Errorf("%w: amount", ErrInvalidInput)
 	}
 
 	threshold, exists := p.thresholds[input.Amount.Currency()]
 	if !exists {
+		if input.VelocityDegraded {
+			return newEvaluation(p.version, velocityReviewScore, DecisionReview, []Signal{{code: SignalVelocityUnavailable, contribution: velocityReviewScore}}), nil
+		}
 		return newEvaluation(
 			p.version,
 			missingPolicyScore,
@@ -163,6 +179,12 @@ func (p Policy) Evaluate(input Input) (Evaluation, error) {
 			DecisionDecline,
 			[]Signal{{code: SignalAmountDeclineThreshold, contribution: maxScore}},
 		), nil
+	}
+	if input.VelocityDegraded {
+		return newEvaluation(p.version, velocityReviewScore, DecisionReview, []Signal{{code: SignalVelocityUnavailable, contribution: velocityReviewScore}}), nil
+	}
+	if threshold.VelocityReviewTransferCount > 0 && input.VelocityTransferCount >= threshold.VelocityReviewTransferCount {
+		return newEvaluation(p.version, velocityReviewScore, DecisionReview, []Signal{{code: SignalVelocityReviewThreshold, contribution: velocityReviewScore}}), nil
 	}
 	if input.Amount.MinorUnits() >= threshold.ReviewAmountMinor {
 		return newEvaluation(
@@ -203,7 +225,7 @@ func (p Policy) validate() error {
 	}
 	for currency, threshold := range p.thresholds {
 		if currency.String() == "" || threshold.Currency != currency ||
-			threshold.ReviewAmountMinor <= 0 || threshold.DeclineAmountMinor < threshold.ReviewAmountMinor {
+			threshold.ReviewAmountMinor <= 0 || threshold.DeclineAmountMinor < threshold.ReviewAmountMinor || threshold.VelocityReviewTransferCount < 0 {
 			return ErrInvalidPolicy
 		}
 	}
