@@ -122,9 +122,13 @@ func consume(ctx context.Context, client *kgo.Client, handler *Handler, logger *
 	}
 }
 
-func handleRecord(ctx context.Context, handler interface {
-	Handle(context.Context, event.Envelope) error
-}, value []byte) (event.Envelope, error) {
+func handleRecord(
+	ctx context.Context,
+	handler interface {
+		Handle(context.Context, event.Envelope) error
+	},
+	value []byte,
+) (event.Envelope, error) {
 	envelope, err := event.ParseEnvelope(value)
 	if err != nil {
 		return event.Envelope{}, fmt.Errorf("parsing Kafka event: %w", err)

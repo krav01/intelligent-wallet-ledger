@@ -168,7 +168,7 @@ func StoreLifecycleTransitionTx(ctx context.Context, tx pgx.Tx, previous, next t
 		`UPDATE transfers
 SET status = $2,
     state_version = $3,
-    journal_entry_id = NULLIF($4, ''),
+    journal_entry_id = NULLIF($4, '')::uuid,
     failure_reason = NULLIF($5, '')
 WHERE id = $1
   AND status = $6
