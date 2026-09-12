@@ -140,7 +140,8 @@ func TestPrepareRiskAssessment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPolicy() error = %v", err)
 	}
-	evaluation, err := policy.Evaluate(riskdomain.Input{Amount: pending.Transfer().Amount()})
+	riskInput := riskdomain.Input{Amount: pending.Transfer().Amount()}
+	evaluation, err := policy.Evaluate(riskInput)
 	if err != nil {
 		t.Fatalf("Evaluate() error = %v", err)
 	}
@@ -152,6 +153,7 @@ func TestPrepareRiskAssessment(t *testing.T) {
 	input, signals, causationID, err := prepareRiskAssessment(
 		pending,
 		next,
+		riskInput,
 		evaluation,
 		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		pending.Transfer().RequestedAt(),
@@ -159,7 +161,7 @@ func TestPrepareRiskAssessment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareRiskAssessment() error = %v", err)
 	}
-	if string(input) != `{"amount_minor":60,"currency":"USD"}` ||
+	if string(input) != `{"amount_minor":60,"currency":"USD","velocity_transfer_count":0,"velocity_degraded":false}` ||
 		string(signals) != `[{"code":"amount_review_threshold","contribution":600}]` ||
 		causationID.String() != "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" {
 		t.Errorf("prepareRiskAssessment() = (%s, %s, %s), want canonical assessment", input, signals, causationID.String())
@@ -168,6 +170,7 @@ func TestPrepareRiskAssessment(t *testing.T) {
 	_, _, _, err = prepareRiskAssessment(
 		pending,
 		next,
+		riskInput,
 		evaluation,
 		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		time.Time{},

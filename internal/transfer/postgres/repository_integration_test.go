@@ -317,7 +317,8 @@ func TestStoreRiskAssessmentTx(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPolicy() error = %v", err)
 	}
-	evaluation, err := policy.Evaluate(riskdomain.Input{Amount: pending.Amount()})
+	input := riskdomain.Input{Amount: pending.Amount(), VelocityTransferCount: 3}
+	evaluation, err := policy.Evaluate(input)
 	if err != nil {
 		t.Fatalf("Evaluate() error = %v", err)
 	}
@@ -341,7 +342,7 @@ func TestStoreRiskAssessmentTx(t *testing.T) {
 	}
 	causationID := fixture.newUUID(t)
 	if err := transferpostgres.StoreRiskAssessmentTx(
-		t.Context(), tx, current, next, evaluation, causationID, pending.RequestedAt(),
+		t.Context(), tx, current, next, input, evaluation, causationID, pending.RequestedAt(),
 	); err != nil {
 		t.Fatalf("StoreRiskAssessmentTx() error = %v", err)
 	}
@@ -351,7 +352,7 @@ func TestStoreRiskAssessmentTx(t *testing.T) {
 
 	var status string
 	var version, score int64
-	var input, signals []byte
+	var encodedInput, signals []byte
 	if err := fixture.pool.QueryRow(
 		t.Context(),
 		`SELECT t.status, t.state_version, a.score, a.captured_input, a.signals
@@ -359,21 +360,23 @@ func TestStoreRiskAssessmentTx(t *testing.T) {
 		 JOIN transfer_risk_assessments AS a ON a.transfer_id = t.id
 		 WHERE t.id = $1`,
 		pending.ID(),
-	).Scan(&status, &version, &score, &input, &signals); err != nil {
+	).Scan(&status, &version, &score, &encodedInput, &signals); err != nil {
 		t.Fatalf("selecting persisted risk assessment: %v", err)
 	}
 	if status != "review_required" || version != 2 || score != 600 {
 		t.Errorf("persisted risk assessment = (%q, %d, %d), want review_required version 2 score 600", status, version, score)
 	}
 	var storedInput struct {
-		AmountMinor int64  `json:"amount_minor"`
-		Currency    string `json:"currency"`
+		AmountMinor           int64  `json:"amount_minor"`
+		Currency              string `json:"currency"`
+		VelocityTransferCount int    `json:"velocity_transfer_count"`
+		VelocityDegraded      bool   `json:"velocity_degraded"`
 	}
-	if err := json.Unmarshal(input, &storedInput); err != nil {
+	if err := json.Unmarshal(encodedInput, &storedInput); err != nil {
 		t.Fatalf("decoding captured input: %v", err)
 	}
-	if storedInput.AmountMinor != 60 || storedInput.Currency != "USD" {
-		t.Errorf("captured input = %+v, want amount 60 USD", storedInput)
+	if storedInput.AmountMinor != 60 || storedInput.Currency != "USD" || storedInput.VelocityTransferCount != 3 || storedInput.VelocityDegraded {
+		t.Errorf("captured input = %+v, want amount 60 USD and velocity count 3", storedInput)
 	}
 	var storedSignals []struct {
 		Code         string `json:"code"`

@@ -56,10 +56,15 @@ services:
       RISK_POLICY_VERSION: risk-v1
       RISK_REVIEW_AMOUNT_USD_MINOR: "50"
       RISK_DECLINE_AMOUNT_USD_MINOR: "100"
+      RISK_VELOCITY_REVIEW_TRANSFER_COUNT: "3"
+      REDIS_ADDRESS: redis:6379
+      RISK_VELOCITY_WINDOW: 5m
     depends_on:
       postgres:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   transaction-worker:

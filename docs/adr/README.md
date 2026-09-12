@@ -13,3 +13,4 @@ history.
 - [ADR-0007: Transactional outbox and idempotent consumer delivery](0007-transactional-outbox-delivery.md)
 - [ADR-0008: Asynchronous transfer lifecycle and deterministic risk assessment](0008-asynchronous-transfer-risk-lifecycle.md)
 - [ADR-0009: Captured velocity input and fail-safe risk review](0009-captured-velocity-risk-input.md)
+- [ADR-0010: Redis source-account velocity observations](0010-redis-source-account-velocity.md)

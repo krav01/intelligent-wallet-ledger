@@ -85,6 +85,21 @@ func TestPolicyEvaluateRejectsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestPolicyRequiresVelocity(t *testing.T) {
+	t.Parallel()
+	policy := mustPolicy(t)
+	if policy.RequiresVelocity() {
+		t.Fatal("RequiresVelocity() = true, want false")
+	}
+	policy, err := riskdomain.NewPolicy(riskdomain.PolicyParams{Version: "risk-v1", Thresholds: []riskdomain.Threshold{{Currency: mustCurrency(t, "USD"), ReviewAmountMinor: 100, DeclineAmountMinor: 1_000, VelocityReviewTransferCount: 3}}})
+	if err != nil {
+		t.Fatalf("NewPolicy() error = %v", err)
+	}
+	if !policy.RequiresVelocity() {
+		t.Fatal("RequiresVelocity() = false, want true")
+	}
+}
+
 func TestPolicyEvaluateVelocity(t *testing.T) {
 	t.Parallel()
 	policy, err := riskdomain.NewPolicy(riskdomain.PolicyParams{Version: "risk-v1", Thresholds: []riskdomain.Threshold{{Currency: mustCurrency(t, "USD"), ReviewAmountMinor: 100, DeclineAmountMinor: 1_000, VelocityReviewTransferCount: 3}}})
