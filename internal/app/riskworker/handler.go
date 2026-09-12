@@ -20,8 +20,12 @@ import (
 
 const consumerName = "risk-worker.v1"
 
-var ErrInvalidArgument = errors.New("risk worker: invalid argument")
-var ErrUnknownPolicy = errors.New("risk worker: unknown policy version")
+var (
+	// ErrInvalidArgument indicates invalid risk-worker configuration or decision data.
+	ErrInvalidArgument = errors.New("risk worker: invalid argument")
+	// ErrUnknownPolicy indicates an event references an unavailable policy version.
+	ErrUnknownPolicy = errors.New("risk worker: unknown policy version")
+)
 
 type Handler struct {
 	pool   *pgxpool.Pool
