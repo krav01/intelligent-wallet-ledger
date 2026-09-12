@@ -61,6 +61,22 @@ The demo deliberately simulates a publisher crash after Kafka acknowledges a rec
 but before PostgreSQL records completion. It then republishes the same event and
 verifies that the consumer inbox applies the database side effect once.
 
+Run the deterministic risk worker with an explicit, versioned policy:
+
+```bash
+DATABASE_URL='postgres://wallet:wallet_dev_only@localhost:5432/wallet?sslmode=disable' \
+  KAFKA_BROKERS='localhost:9092' \
+  RISK_POLICY_VERSION='risk-v1' \
+  RISK_REVIEW_AMOUNT_USD_MINOR=50 \
+  RISK_DECLINE_AMOUNT_USD_MINOR=100 \
+  make run-risk-worker
+```
+
+It commits a Kafka offset only after PostgreSQL atomically reserves the inbox event,
+persists the assessment, transitions the transfer, and writes `transfer.risk_assessed`
+to the outbox. A malformed event or unavailable policy is not acknowledged and is
+delivered again for operator recovery.
+
 ## Architecture
 
 The repository is a modular Go system with small deployable applications. Bounded
