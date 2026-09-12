@@ -352,7 +352,7 @@ func TestStoreRiskAssessmentTx(t *testing.T) {
 
 	var status string
 	var version, score int64
-	var input, signals []byte
+	var encodedInput, signals []byte
 	if err := fixture.pool.QueryRow(
 		t.Context(),
 		`SELECT t.status, t.state_version, a.score, a.captured_input, a.signals
@@ -360,7 +360,7 @@ func TestStoreRiskAssessmentTx(t *testing.T) {
 		 JOIN transfer_risk_assessments AS a ON a.transfer_id = t.id
 		 WHERE t.id = $1`,
 		pending.ID(),
-	).Scan(&status, &version, &score, &input, &signals); err != nil {
+	).Scan(&status, &version, &score, &encodedInput, &signals); err != nil {
 		t.Fatalf("selecting persisted risk assessment: %v", err)
 	}
 	if status != "review_required" || version != 2 || score != 600 {
@@ -372,7 +372,7 @@ func TestStoreRiskAssessmentTx(t *testing.T) {
 		VelocityTransferCount int    `json:"velocity_transfer_count"`
 		VelocityDegraded      bool   `json:"velocity_degraded"`
 	}
-	if err := json.Unmarshal(input, &storedInput); err != nil {
+	if err := json.Unmarshal(encodedInput, &storedInput); err != nil {
 		t.Fatalf("decoding captured input: %v", err)
 	}
 	if storedInput.AmountMinor != 60 || storedInput.Currency != "USD" || storedInput.VelocityTransferCount != 3 || storedInput.VelocityDegraded {
