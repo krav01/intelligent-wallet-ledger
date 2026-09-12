@@ -155,6 +155,66 @@ func TestTransferLifecycleConstraints(t *testing.T) {
 	}
 }
 
+func TestRepositoryCreatePendingStoresRequestedEventWithoutLedgerEffect(t *testing.T) {
+	fixture := newFixture(t)
+	repository := mustRepository(t, fixture.pool)
+	ownerID := fixture.newUUID(t)
+	sourceID := fixture.createAccount(t, ownerID, "USD", "customer", "active")
+	destinationID := fixture.createAccount(t, fixture.newUUID(t), "USD", "customer", "active")
+	pending := fixture.transfer(t, ownerID, sourceID, destinationID, "pending-request", 60)
+	lifecycle, err := transferdomain.NewPendingLifecycle(pending, "risk-v1")
+	if err != nil {
+		t.Fatalf("NewPendingLifecycle() error = %v", err)
+	}
+
+	created, err := repository.CreatePending(t.Context(), lifecycle)
+	if err != nil {
+		t.Fatalf("Repository.CreatePending() error = %v", err)
+	}
+	if created.Status() != transferdomain.StatusPendingRisk || created.Version() != 1 ||
+		created.RiskPolicyVersion() != "risk-v1" {
+		t.Errorf("CreatePending() lifecycle = (%s, %d, %q), want pending risk v1", created.Status(), created.Version(), created.RiskPolicyVersion())
+	}
+	fixture.assertBalance(t, sourceID, 0, 0)
+	fixture.assertBalance(t, destinationID, 0, 0)
+
+	var eventType, policyVersion string
+	var aggregateVersion int64
+	var payload []byte
+	if err := fixture.pool.QueryRow(
+		t.Context(),
+		`SELECT event_type, aggregate_version, payload
+		 FROM outbox_events
+		 WHERE aggregate_type = 'transfer' AND aggregate_id = $1`,
+		pending.ID(),
+	).Scan(&eventType, &aggregateVersion, &payload); err != nil {
+		t.Fatalf("selecting requested event: %v", err)
+	}
+	var eventPayload struct {
+		RiskPolicyVersion string `json:"risk_policy_version"`
+	}
+	if err := json.Unmarshal(payload, &eventPayload); err != nil {
+		t.Fatalf("decoding requested event payload: %v", err)
+	}
+	policyVersion = eventPayload.RiskPolicyVersion
+	if eventType != transferevents.RequestedType || aggregateVersion != 1 || policyVersion != "risk-v1" {
+		t.Errorf("requested event = (%q, %d, %q), want transfer.requested v1 risk-v1", eventType, aggregateVersion, policyVersion)
+	}
+
+	if _, err := fixture.pool.Exec(t.Context(), `UPDATE accounts SET status = 'frozen' WHERE id = $1`, sourceID); err != nil {
+		t.Fatalf("freezing source account: %v", err)
+	}
+	replayed, err := repository.CreatePending(t.Context(), lifecycle)
+	if err != nil {
+		t.Fatalf("Repository.CreatePending(replay) error = %v", err)
+	}
+	if replayed.Status() != transferdomain.StatusPendingRisk || replayed.Version() != 1 {
+		t.Errorf("CreatePending(replay) = (%s, %d), want pending risk v1", replayed.Status(), replayed.Version())
+	}
+	fixture.assertTransferCount(t, ownerID, pending.IdempotencyKey(), 1)
+	fixture.assertOutboxEventCount(t, pending.ID(), 1)
+}
+
 func TestTransferRiskAssessmentSchema(t *testing.T) {
 	fixture := newFixture(t)
 	ownerID := fixture.newUUID(t)

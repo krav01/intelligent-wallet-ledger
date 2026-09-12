@@ -9,6 +9,7 @@ import (
 	ledgerdomain "github.com/krav01/intelligent-wallet-ledger/internal/ledger/domain"
 	riskdomain "github.com/krav01/intelligent-wallet-ledger/internal/risk/domain"
 	transferdomain "github.com/krav01/intelligent-wallet-ledger/internal/transfer/domain"
+	transferevents "github.com/krav01/intelligent-wallet-ledger/internal/transfer/events"
 )
 
 func TestNewRepositoryRejectsNilPool(t *testing.T) {
@@ -48,6 +49,33 @@ func TestPrepareTransferRejectsZeroValue(t *testing.T) {
 	_, err := prepareTransfer(transferdomain.Transfer{})
 	if !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("prepareTransfer() error = %v, want ErrInvalidArgument", err)
+	}
+}
+
+func TestPreparePendingTransfer(t *testing.T) {
+	t.Parallel()
+
+	transfer := mustTransfer(t, transferdomain.NewTransferParams{
+		ID:                   "11111111-1111-4111-8111-111111111111",
+		IdempotencyKey:       "request-1",
+		RequesterID:          "22222222-2222-4222-8222-222222222222",
+		SourceAccountID:      "33333333-3333-4333-8333-333333333333",
+		DestinationAccountID: "44444444-4444-4444-8444-444444444444",
+		Amount:               mustMoney(t, 50, "USD"),
+		RequestedAt:          time.Date(2026, time.September, 12, 10, 0, 0, 0, time.UTC),
+	})
+	pending, err := transferdomain.NewPendingLifecycle(transfer, "risk-v1")
+	if err != nil {
+		t.Fatalf("NewPendingLifecycle() error = %v", err)
+	}
+
+	prepared, err := preparePendingTransfer(pending)
+	if err != nil {
+		t.Fatalf("preparePendingTransfer() error = %v", err)
+	}
+	if prepared.lifecycle != pending || prepared.requestedEvent.EventType() != transferevents.RequestedType ||
+		prepared.requestedEvent.AggregateVersion() != pending.Version() {
+		t.Error("preparePendingTransfer() did not preserve the pending lifecycle and request event")
 	}
 }
 
