@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/krav01/intelligent-wallet-ledger/internal/event"
 	ledgerdomain "github.com/krav01/intelligent-wallet-ledger/internal/ledger/domain"
 	riskdomain "github.com/krav01/intelligent-wallet-ledger/internal/risk/domain"
 	transferdomain "github.com/krav01/intelligent-wallet-ledger/internal/transfer/domain"
@@ -92,6 +93,36 @@ func TestRiskAssessedRejectsMissingCausationID(t *testing.T) {
 	}
 }
 
+func TestParseRiskAssessed(t *testing.T) {
+	t.Parallel()
+	lifecycle, err := mustPendingLifecycle(t).Approve()
+	if err != nil {
+		t.Fatalf("Approve() error = %v", err)
+	}
+	draft, err := transferevents.RiskAssessed(
+		lifecycle,
+		mustApproveEvaluation(t),
+		time.Date(2026, time.September, 12, 12, 1, 0, 0, time.UTC),
+		"55555555-5555-4555-8555-555555555555",
+	)
+	if err != nil {
+		t.Fatalf("RiskAssessed() error = %v", err)
+	}
+	envelope, err := event.NewEnvelope("66666666-6666-4666-8666-666666666666", draft)
+	if err != nil {
+		t.Fatalf("NewEnvelope() error = %v", err)
+	}
+
+	parsed, err := transferevents.ParseRiskAssessed(envelope)
+	if err != nil {
+		t.Fatalf("ParseRiskAssessed() error = %v", err)
+	}
+	if parsed.TransferID() != lifecycle.Transfer().ID() || parsed.RiskPolicyVersion() != "risk-v1" ||
+		parsed.Decision() != riskdomain.DecisionApprove {
+		t.Errorf("ParseRiskAssessed() = (%q, %q, %s), want approved risk result", parsed.TransferID(), parsed.RiskPolicyVersion(), parsed.Decision())
+	}
+}
+
 func mustReviewEvaluation(t testing.TB) riskdomain.Evaluation {
 	t.Helper()
 	currency, err := ledgerdomain.ParseCurrency("USD")
@@ -110,6 +141,34 @@ func mustReviewEvaluation(t testing.TB) riskdomain.Evaluation {
 		t.Fatalf("NewPolicy() error = %v", err)
 	}
 	money, err := ledgerdomain.NewMoney(125, currency)
+	if err != nil {
+		t.Fatalf("NewMoney() error = %v", err)
+	}
+	evaluation, err := policy.Evaluate(riskdomain.Input{Amount: money})
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	return evaluation
+}
+
+func mustApproveEvaluation(t testing.TB) riskdomain.Evaluation {
+	t.Helper()
+	currency, err := ledgerdomain.ParseCurrency("USD")
+	if err != nil {
+		t.Fatalf("ParseCurrency() error = %v", err)
+	}
+	policy, err := riskdomain.NewPolicy(riskdomain.PolicyParams{
+		Version: "risk-v1",
+		Thresholds: []riskdomain.Threshold{{
+			Currency:           currency,
+			ReviewAmountMinor:  100,
+			DeclineAmountMinor: 200,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewPolicy() error = %v", err)
+	}
+	money, err := ledgerdomain.NewMoney(50, currency)
 	if err != nil {
 		t.Fatalf("NewMoney() error = %v", err)
 	}

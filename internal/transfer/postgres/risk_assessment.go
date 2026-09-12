@@ -158,6 +158,38 @@ func StoreRiskAssessmentTx(
 	return nil
 }
 
+// StoreLifecycleTransitionTx persists a non-risk lifecycle transition under the held row lock.
+func StoreLifecycleTransitionTx(ctx context.Context, tx pgx.Tx, previous, next transferdomain.Lifecycle) error {
+	if tx == nil {
+		return fmt.Errorf("%w: transaction is required", ErrInvalidArgument)
+	}
+	commandTag, err := tx.Exec(
+		ctx,
+		`UPDATE transfers
+SET status = $2,
+    state_version = $3,
+    journal_entry_id = NULLIF($4, '')::uuid,
+    failure_reason = NULLIF($5, '')
+WHERE id = $1
+  AND status = $6
+  AND state_version = $7`,
+		previous.Transfer().ID(),
+		next.Status().String(),
+		next.Version(),
+		next.JournalEntryID(),
+		next.FailureReason(),
+		previous.Status().String(),
+		previous.Version(),
+	)
+	if err != nil {
+		return fmt.Errorf("updating transfer lifecycle: %w", err)
+	}
+	if commandTag.RowsAffected() != 1 {
+		return ErrStateConflict
+	}
+	return nil
+}
+
 type lifecycleRecord struct {
 	id                   string
 	requesterID          string

@@ -1,15 +1,17 @@
 BINARY := bin/wallet-api
 PUBLISHER_BINARY := bin/outbox-publisher
 RISK_WORKER_BINARY := bin/risk-worker
+TRANSACTION_WORKER_BINARY := bin/transaction-worker
 GO ?= go
 
-.PHONY: build clean demo-outbox fmt help migrate-down migrate-up run run-publisher run-risk-worker test test-integration test-race vet vuln
+.PHONY: build clean demo-outbox fmt help migrate-down migrate-up run run-publisher run-risk-worker run-transaction-worker test test-integration test-race vet vuln
 
 ## build: Build the wallet API.
 build:
 	$(GO) build -trimpath -o $(BINARY) ./cmd/wallet-api
 	$(GO) build -trimpath -o $(PUBLISHER_BINARY) ./cmd/outbox-publisher
 	$(GO) build -trimpath -o $(RISK_WORKER_BINARY) ./cmd/risk-worker
+	$(GO) build -trimpath -o $(TRANSACTION_WORKER_BINARY) ./cmd/transaction-worker
 
 ## clean: Remove local build and coverage artifacts.
 clean:
@@ -51,6 +53,10 @@ run-publisher:
 ## run-risk-worker: Run the deterministic Kafka risk worker.
 run-risk-worker:
 	$(GO) run ./cmd/risk-worker
+
+## run-transaction-worker: Run the Kafka transaction posting worker.
+run-transaction-worker:
+	$(GO) run ./cmd/transaction-worker
 
 ## test: Run deterministic unit tests.
 test:
