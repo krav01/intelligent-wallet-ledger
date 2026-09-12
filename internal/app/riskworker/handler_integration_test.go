@@ -4,7 +4,9 @@ package riskworker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"testing"
 	"time"
@@ -36,6 +38,38 @@ func TestHandlerHandleDeduplicatesRedelivery(t *testing.T) {
 	fixture.assertCount(t, `SELECT count(*) FROM consumer_inbox WHERE consumer_name = 'risk-worker.v1' AND event_id = $1`, envelope.EventID(), 1)
 	fixture.assertBalance(t, lifecycle.Transfer().SourceAccountID(), 0, 0)
 	fixture.assertBalance(t, lifecycle.Transfer().DestinationAccountID(), 0, 0)
+}
+
+func TestHandlerHandleCapturesVelocityOnceAcrossRedelivery(t *testing.T) {
+	fixture := newIntegrationFixture(t)
+	lifecycle, envelope := fixture.createPendingRequested(t, 40)
+	observer := &fakeVelocityObserver{count: 3}
+	handler := fixture.handlerWithVelocity(t, observer)
+
+	if err := handler.Handle(t.Context(), envelope); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if err := handler.Handle(t.Context(), envelope); err != nil {
+		t.Fatalf("Handle(redelivery) error = %v", err)
+	}
+	if observer.calls != 1 {
+		t.Errorf("velocity observer calls = %d, want 1", observer.calls)
+	}
+	var input struct {
+		VelocityTransferCount int  `json:"velocity_transfer_count"`
+		VelocityDegraded      bool `json:"velocity_degraded"`
+	}
+	var encodedInput []byte
+	if err := fixture.pool.QueryRow(t.Context(), `SELECT captured_input FROM transfer_risk_assessments WHERE transfer_id = $1`, lifecycle.Transfer().ID()).Scan(&encodedInput); err != nil {
+		t.Fatalf("selecting captured input: %v", err)
+	}
+	if err := json.Unmarshal(encodedInput, &input); err != nil {
+		t.Fatalf("decoding captured input: %v", err)
+	}
+	if input.VelocityTransferCount != 3 || input.VelocityDegraded {
+		t.Errorf("captured input = %+v, want count 3 and non-degraded observation", input)
+	}
+	fixture.assertLifecycle(t, lifecycle.Transfer().ID(), "review_required", 2)
 }
 
 func TestHandlerHandleRollsBackMismatchedRequestedTransfer(t *testing.T) {
@@ -109,6 +143,31 @@ func (f *integrationFixture) handler(t testing.TB) *Handler {
 	handler, err := NewHandler(f.pool, policy, time.Now)
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)
+	}
+	return handler
+}
+
+func (f *integrationFixture) handlerWithVelocity(t testing.TB, velocity VelocityObserver) *Handler {
+	t.Helper()
+	currency, err := ledgerdomain.ParseCurrency("USD")
+	if err != nil {
+		t.Fatalf("ParseCurrency() error = %v", err)
+	}
+	policy, err := riskdomain.NewPolicy(riskdomain.PolicyParams{
+		Version: "risk-v1",
+		Thresholds: []riskdomain.Threshold{{
+			Currency:                    currency,
+			ReviewAmountMinor:           50,
+			DeclineAmountMinor:          100,
+			VelocityReviewTransferCount: 3,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewPolicy() error = %v", err)
+	}
+	handler, err := NewHandlerWithPoliciesAndVelocity(f.pool, []riskdomain.Policy{policy}, velocity, slog.New(slog.DiscardHandler), time.Now)
+	if err != nil {
+		t.Fatalf("NewHandlerWithPoliciesAndVelocity() error = %v", err)
 	}
 	return handler
 }

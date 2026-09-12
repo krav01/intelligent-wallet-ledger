@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/krav01/intelligent-wallet-ledger/internal/app/riskworker"
+	riskredis "github.com/krav01/intelligent-wallet-ledger/internal/risk/redis"
 )
 
 func main() {
@@ -19,8 +20,24 @@ func main() {
 		os.Exit(1)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	err = riskworker.Run(ctx, config, logger)
+	var observer *riskredis.Observer
+	var velocity riskworker.VelocityObserver
+	if config.Velocity.Enabled() {
+		var observerErr error
+		observer, observerErr = riskredis.NewObserver(config.Velocity.RedisAddress, config.Velocity.Window)
+		if observerErr != nil {
+			logger.Error("velocity observer configuration failed", "error", observerErr)
+			os.Exit(1)
+		}
+		velocity = observer
+	}
+	err = riskworker.Run(ctx, config, velocity, logger)
 	stop()
+	if observer != nil {
+		if closeErr := observer.Close(); closeErr != nil {
+			logger.Warn("closing velocity observer", "error", closeErr)
+		}
+	}
 	if err != nil {
 		logger.Error("risk worker stopped", "error", err)
 		os.Exit(1)

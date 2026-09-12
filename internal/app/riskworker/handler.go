@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -27,10 +28,17 @@ var (
 	ErrUnknownPolicy = errors.New("risk worker: unknown policy version")
 )
 
+// VelocityObserver captures one transfer in a source-account velocity window.
+type VelocityObserver interface {
+	Observe(context.Context, string, string, time.Time) (int, error)
+}
+
 // Handler assesses pending transfers exactly once per consumed outbox event.
 type Handler struct {
 	pool     *pgxpool.Pool
 	policies map[string]riskdomain.Policy
+	velocity VelocityObserver
+	logger   *slog.Logger
 	now      func() time.Time
 }
 
@@ -41,8 +49,22 @@ func NewHandler(pool *pgxpool.Pool, policy riskdomain.Policy, now func() time.Ti
 
 // NewHandlerWithPolicies creates a handler that selects an immutable policy by version.
 func NewHandlerWithPolicies(pool *pgxpool.Pool, policies []riskdomain.Policy, now func() time.Time) (*Handler, error) {
-	if pool == nil || len(policies) == 0 || now == nil {
+	return NewHandlerWithPoliciesAndVelocity(pool, policies, noopVelocityObserver{}, slog.Default(), now)
+}
+
+// NewHandlerWithPoliciesAndVelocity creates a handler with a captured velocity observer.
+func NewHandlerWithPoliciesAndVelocity(
+	pool *pgxpool.Pool,
+	policies []riskdomain.Policy,
+	velocity VelocityObserver,
+	logger *slog.Logger,
+	now func() time.Time,
+) (*Handler, error) {
+	if pool == nil || len(policies) == 0 || velocity == nil || now == nil {
 		return nil, ErrInvalidArgument
+	}
+	if logger == nil {
+		logger = slog.Default()
 	}
 	byVersion := make(map[string]riskdomain.Policy, len(policies))
 	for _, policy := range policies {
@@ -54,7 +76,7 @@ func NewHandlerWithPolicies(pool *pgxpool.Pool, policies []riskdomain.Policy, no
 		}
 		byVersion[policy.Version()] = policy
 	}
-	return &Handler{pool: pool, policies: byVersion, now: now}, nil
+	return &Handler{pool: pool, policies: byVersion, velocity: velocity, logger: logger, now: now}, nil
 }
 
 // Handle persists an assessment and its resulting event in one transaction.
@@ -93,7 +115,9 @@ func (h *Handler) Handle(ctx context.Context, envelope event.Envelope) error {
 		current.RiskPolicyVersion() != requested.RiskPolicyVersion() {
 		return transferpostgres.ErrStateConflict
 	}
-	evaluation, err := policy.Evaluate(riskdomain.Input{Amount: current.Transfer().Amount()})
+	assessedAt := h.now().UTC()
+	input := h.captureInput(ctx, current, assessedAt)
+	evaluation, err := policy.Evaluate(input)
 	if err != nil {
 		return err
 	}
@@ -101,8 +125,7 @@ func (h *Handler) Handle(ctx context.Context, envelope event.Envelope) error {
 	if err != nil {
 		return err
 	}
-	assessedAt := h.now().UTC()
-	if err := transferpostgres.StoreRiskAssessmentTx(ctx, tx, current, next, evaluation, envelope.EventID(), assessedAt); err != nil {
+	if err := transferpostgres.StoreRiskAssessmentTx(ctx, tx, current, next, input, evaluation, envelope.EventID(), assessedAt); err != nil {
 		return err
 	}
 	draft, err := transferevents.RiskAssessed(next, evaluation, assessedAt, envelope.EventID())
@@ -113,6 +136,24 @@ func (h *Handler) Handle(ctx context.Context, envelope event.Envelope) error {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func (h *Handler) captureInput(ctx context.Context, current transferdomain.Lifecycle, assessedAt time.Time) riskdomain.Input {
+	input := riskdomain.Input{Amount: current.Transfer().Amount()}
+	count, err := h.velocity.Observe(ctx, current.Transfer().SourceAccountID(), current.Transfer().ID(), assessedAt)
+	if err != nil {
+		h.logger.Warn("velocity observation degraded", "transfer_id", current.Transfer().ID(), "error", err)
+		input.VelocityDegraded = true
+		return input
+	}
+	input.VelocityTransferCount = count
+	return input
+}
+
+type noopVelocityObserver struct{}
+
+func (noopVelocityObserver) Observe(context.Context, string, string, time.Time) (int, error) {
+	return 0, nil
 }
 
 func transition(lifecycle transferdomain.Lifecycle, decision riskdomain.Decision) (transferdomain.Lifecycle, error) {

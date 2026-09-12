@@ -32,11 +32,25 @@ type Config struct {
 	KafkaTopic   string
 	KafkaGroupID string
 	Policies     []riskdomain.Policy
+	Velocity     VelocityConfig
 }
+
+// VelocityConfig contains the Redis connection and sliding-window configuration.
+type VelocityConfig struct {
+	RedisAddress string
+	Window       time.Duration
+}
+
+// Enabled reports whether Redis velocity observation is configured.
+func (c VelocityConfig) Enabled() bool { return c.RedisAddress != "" }
 
 // ConfigFromEnv loads the risk-worker configuration from environment variables.
 func ConfigFromEnv() (Config, error) {
 	policies, err := policiesFromEnv()
+	if err != nil {
+		return Config{}, err
+	}
+	velocity, err := velocityConfigFromEnv(policies)
 	if err != nil {
 		return Config{}, err
 	}
@@ -55,11 +69,12 @@ func ConfigFromEnv() (Config, error) {
 		KafkaTopic:   topic,
 		KafkaGroupID: groupID,
 		Policies:     policies,
+		Velocity:     velocity,
 	}, nil
 }
 
 // Run consumes requested transfer events until the context is cancelled.
-func Run(ctx context.Context, config Config, logger *slog.Logger) error {
+func Run(ctx context.Context, config Config, velocity VelocityObserver, logger *slog.Logger) error {
 	if logger == nil {
 		return errors.New("logger is required")
 	}
@@ -75,6 +90,12 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 	if config.KafkaGroupID == "" {
 		return errors.New("kafka group id is required")
 	}
+	if config.Velocity.Enabled() && velocity == nil {
+		return errors.New("velocity observer is required")
+	}
+	if velocity == nil {
+		velocity = noopVelocityObserver{}
+	}
 
 	pool, err := pgxpool.New(ctx, config.DatabaseURL)
 	if err != nil {
@@ -87,7 +108,7 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 		return fmt.Errorf("pinging PostgreSQL: %w", err)
 	}
 
-	handler, err := NewHandlerWithPolicies(pool, config.Policies, time.Now)
+	handler, err := NewHandlerWithPoliciesAndVelocity(pool, config.Policies, velocity, logger, time.Now)
 	if err != nil {
 		return fmt.Errorf("creating risk handler: %w", err)
 	}
@@ -169,6 +190,10 @@ func policyFromEnv() (riskdomain.Policy, error) {
 	if err != nil {
 		return riskdomain.Policy{}, err
 	}
+	velocityReviewCount, err := parseNonNegativeInt("RISK_VELOCITY_REVIEW_TRANSFER_COUNT", os.Getenv("RISK_VELOCITY_REVIEW_TRANSFER_COUNT"))
+	if err != nil {
+		return riskdomain.Policy{}, err
+	}
 	currency, err := ledgerdomain.ParseCurrency("USD")
 	if err != nil {
 		return riskdomain.Policy{}, fmt.Errorf("parsing USD currency: %w", err)
@@ -176,9 +201,10 @@ func policyFromEnv() (riskdomain.Policy, error) {
 	policy, err := riskdomain.NewPolicy(riskdomain.PolicyParams{
 		Version: version,
 		Thresholds: []riskdomain.Threshold{{
-			Currency:           currency,
-			ReviewAmountMinor:  reviewAmount,
-			DeclineAmountMinor: declineAmount,
+			Currency:                    currency,
+			ReviewAmountMinor:           reviewAmount,
+			DeclineAmountMinor:          declineAmount,
+			VelocityReviewTransferCount: velocityReviewCount,
 		}},
 	})
 	if err != nil {
@@ -189,9 +215,10 @@ func policyFromEnv() (riskdomain.Policy, error) {
 
 func policiesFromJSON(encoded string) ([]riskdomain.Policy, error) {
 	var params []struct {
-		Version    string `json:"version"`
-		ReviewUSD  int64  `json:"review_amount_usd_minor"`
-		DeclineUSD int64  `json:"decline_amount_usd_minor"`
+		Version                     string `json:"version"`
+		ReviewUSD                   int64  `json:"review_amount_usd_minor"`
+		DeclineUSD                  int64  `json:"decline_amount_usd_minor"`
+		VelocityReviewTransferCount int    `json:"velocity_review_transfer_count"`
 	}
 	if err := json.Unmarshal([]byte(encoded), &params); err != nil || len(params) == 0 {
 		return nil, errors.New("parsing RISK_POLICIES_JSON: nonempty policy array required")
@@ -202,7 +229,7 @@ func policiesFromJSON(encoded string) ([]riskdomain.Policy, error) {
 	}
 	policies := make([]riskdomain.Policy, 0, len(params))
 	for _, param := range params {
-		policy, err := riskdomain.NewPolicy(riskdomain.PolicyParams{Version: param.Version, Thresholds: []riskdomain.Threshold{{Currency: currency, ReviewAmountMinor: param.ReviewUSD, DeclineAmountMinor: param.DeclineUSD}}})
+		policy, err := riskdomain.NewPolicy(riskdomain.PolicyParams{Version: param.Version, Thresholds: []riskdomain.Threshold{{Currency: currency, ReviewAmountMinor: param.ReviewUSD, DeclineAmountMinor: param.DeclineUSD, VelocityReviewTransferCount: param.VelocityReviewTransferCount}}})
 		if err != nil {
 			return nil, fmt.Errorf("creating risk policy: %w", err)
 		}
@@ -221,6 +248,36 @@ func parsePositiveInt64(name, value string) (int64, error) {
 		return 0, fmt.Errorf("parsing %s: positive integer required", name)
 	}
 	return parsed, nil
+}
+
+func velocityConfigFromEnv(policies []riskdomain.Policy) (VelocityConfig, error) {
+	for _, policy := range policies {
+		if !policy.RequiresVelocity() {
+			continue
+		}
+		address := strings.TrimSpace(os.Getenv("REDIS_ADDRESS"))
+		if address == "" {
+			return VelocityConfig{}, errors.New("REDIS_ADDRESS is required when velocity is enabled")
+		}
+		window, err := time.ParseDuration(strings.TrimSpace(os.Getenv("RISK_VELOCITY_WINDOW")))
+		if err != nil || window < time.Millisecond {
+			return VelocityConfig{}, errors.New("RISK_VELOCITY_WINDOW must be at least one millisecond when velocity is enabled")
+		}
+		return VelocityConfig{RedisAddress: address, Window: window}, nil
+	}
+	return VelocityConfig{}, nil
+}
+
+func parseNonNegativeInt(name, value string) (int, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 0)
+	if err != nil || parsed < 0 {
+		return 0, fmt.Errorf("parsing %s: non-negative integer required", name)
+	}
+	return int(parsed), nil
 }
 
 func splitNonempty(value string) []string {

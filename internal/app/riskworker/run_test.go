@@ -44,6 +44,32 @@ func TestConfigFromEnvLoadsPolicyRegistry(t *testing.T) {
 	}
 }
 
+func TestConfigFromEnvLoadsVelocityConfiguration(t *testing.T) {
+	t.Setenv("RISK_POLICY_VERSION", "risk-v1")
+	t.Setenv("RISK_REVIEW_AMOUNT_USD_MINOR", "50")
+	t.Setenv("RISK_DECLINE_AMOUNT_USD_MINOR", "100")
+	t.Setenv("RISK_VELOCITY_REVIEW_TRANSFER_COUNT", "3")
+	t.Setenv("REDIS_ADDRESS", " redis:6379 ")
+	t.Setenv("RISK_VELOCITY_WINDOW", "5m")
+	config, err := ConfigFromEnv()
+	if err != nil {
+		t.Fatalf("ConfigFromEnv() error = %v", err)
+	}
+	if !config.Velocity.Enabled() || config.Velocity.RedisAddress != "redis:6379" || config.Velocity.Window != 5*time.Minute {
+		t.Errorf("ConfigFromEnv() velocity = %+v, want redis:6379 and 5m", config.Velocity)
+	}
+}
+
+func TestConfigFromEnvRejectsIncompleteVelocityConfiguration(t *testing.T) {
+	t.Setenv("RISK_POLICY_VERSION", "risk-v1")
+	t.Setenv("RISK_REVIEW_AMOUNT_USD_MINOR", "50")
+	t.Setenv("RISK_DECLINE_AMOUNT_USD_MINOR", "100")
+	t.Setenv("RISK_VELOCITY_REVIEW_TRANSFER_COUNT", "3")
+	if _, err := ConfigFromEnv(); err == nil {
+		t.Fatal("ConfigFromEnv() error = nil, want missing Redis configuration error")
+	}
+}
+
 func TestConfigFromEnvRejectsMissingPolicyThreshold(t *testing.T) {
 	t.Setenv("RISK_POLICY_VERSION", "risk-v1")
 	t.Setenv("RISK_REVIEW_AMOUNT_USD_MINOR", "50")
@@ -55,7 +81,7 @@ func TestConfigFromEnvRejectsMissingPolicyThreshold(t *testing.T) {
 
 func TestRunValidatesRequiredConfiguration(t *testing.T) {
 	t.Parallel()
-	if err := Run(t.Context(), Config{}, slog.New(slog.DiscardHandler)); err == nil {
+	if err := Run(t.Context(), Config{}, nil, slog.New(slog.DiscardHandler)); err == nil {
 		t.Fatal("Run() error = nil, want missing database error")
 	}
 }

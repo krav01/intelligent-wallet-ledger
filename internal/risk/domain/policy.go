@@ -151,6 +151,16 @@ func NewPolicy(params PolicyParams) (Policy, error) {
 // Version returns the immutable policy version.
 func (p Policy) Version() string { return p.version }
 
+// RequiresVelocity reports whether any threshold requires a captured velocity observation.
+func (p Policy) RequiresVelocity() bool {
+	for _, threshold := range p.thresholds {
+		if threshold.VelocityReviewTransferCount > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // Evaluate produces a deterministic result without reading mutable process state.
 func (p Policy) Evaluate(input Input) (Evaluation, error) {
 	if err := p.validate(); err != nil {

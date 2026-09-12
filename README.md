@@ -69,6 +69,9 @@ DATABASE_URL='postgres://wallet:wallet_dev_only@localhost:5432/wallet?sslmode=di
   RISK_POLICY_VERSION='risk-v1' \
   RISK_REVIEW_AMOUNT_USD_MINOR=50 \
   RISK_DECLINE_AMOUNT_USD_MINOR=100 \
+  RISK_VELOCITY_REVIEW_TRANSFER_COUNT=3 \
+  REDIS_ADDRESS='localhost:6379' \
+  RISK_VELOCITY_WINDOW='5m' \
   make run-risk-worker
 ```
 
@@ -76,11 +79,16 @@ For a policy rotation, set `RISK_POLICIES_JSON` instead of the three single-poli
 variables. It is a non-empty array of immutable USD policies, for example:
 
 ```bash
-RISK_POLICIES_JSON='[{"version":"risk-v1","review_amount_usd_minor":50,"decline_amount_usd_minor":100},{"version":"risk-v2","review_amount_usd_minor":75,"decline_amount_usd_minor":150}]'
+RISK_POLICIES_JSON='[{"version":"risk-v1","review_amount_usd_minor":50,"decline_amount_usd_minor":100,"velocity_review_transfer_count":3},{"version":"risk-v2","review_amount_usd_minor":75,"decline_amount_usd_minor":150,"velocity_review_transfer_count":3}]'
 ```
 
 The worker selects the policy version captured in each request, so pending v1 events
 remain reproducible while v2 is deployed.
+
+When a policy enables velocity, `REDIS_ADDRESS` and `RISK_VELOCITY_WINDOW` are
+required. The worker observes the source-account count over the configured sliding
+window. Redis unavailability is captured and routed to deterministic manual review;
+it never silently approves a transfer.
 
 It commits a Kafka offset only after PostgreSQL atomically reserves the inbox event,
 persists the assessment, transitions the transfer, and writes `transfer.risk_assessed`

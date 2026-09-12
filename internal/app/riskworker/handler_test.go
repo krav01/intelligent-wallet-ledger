@@ -1,7 +1,9 @@
 package riskworker
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -36,6 +38,49 @@ func TestTransition(t *testing.T) {
 	if _, err := transition(pending, riskdomain.DecisionUnknown); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("transition(unknown) error = %v", err)
 	}
+}
+
+func TestHandlerCaptureInput(t *testing.T) {
+	t.Parallel()
+	lifecycle := mustPendingLifecycle(t)
+	assessedAt := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name         string
+		observer     *fakeVelocityObserver
+		wantCount    int
+		wantDegraded bool
+	}{
+		{name: "observed", observer: &fakeVelocityObserver{count: 3}, wantCount: 3},
+		{name: "degraded", observer: &fakeVelocityObserver{err: errors.New("redis unavailable")}, wantDegraded: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := &Handler{velocity: test.observer, logger: slog.New(slog.DiscardHandler)}
+			input := handler.captureInput(t.Context(), lifecycle, assessedAt)
+			if input.Amount != lifecycle.Transfer().Amount() || input.VelocityTransferCount != test.wantCount || input.VelocityDegraded != test.wantDegraded {
+				t.Errorf("captureInput() = %+v, want transfer amount, count %d, degraded %t", input, test.wantCount, test.wantDegraded)
+			}
+			if test.observer.sourceAccountID != lifecycle.Transfer().SourceAccountID() || test.observer.transferID != lifecycle.Transfer().ID() || !test.observer.observedAt.Equal(assessedAt) {
+				t.Errorf("Observe() = (%q, %q, %s), want transfer source account, ID, and assessment time", test.observer.sourceAccountID, test.observer.transferID, test.observer.observedAt)
+			}
+		})
+	}
+}
+
+type fakeVelocityObserver struct {
+	sourceAccountID string
+	transferID      string
+	observedAt      time.Time
+	count           int
+	err             error
+	calls           int
+}
+
+func (o *fakeVelocityObserver) Observe(_ context.Context, sourceAccountID, transferID string, observedAt time.Time) (int, error) {
+	o.calls++
+	o.sourceAccountID = sourceAccountID
+	o.transferID = transferID
+	o.observedAt = observedAt
+	return o.count, o.err
 }
 
 func mustPendingLifecycle(t *testing.T) transferdomain.Lifecycle {

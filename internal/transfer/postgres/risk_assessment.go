@@ -111,6 +111,7 @@ func StoreRiskAssessmentTx(
 	tx pgx.Tx,
 	previous transferdomain.Lifecycle,
 	next transferdomain.Lifecycle,
+	input riskdomain.Input,
 	evaluation riskdomain.Evaluation,
 	causationEventID string,
 	assessedAt time.Time,
@@ -118,7 +119,7 @@ func StoreRiskAssessmentTx(
 	if tx == nil {
 		return fmt.Errorf("%w: transaction is required", ErrInvalidArgument)
 	}
-	input, signals, causationID, err := prepareRiskAssessment(previous, next, evaluation, causationEventID, assessedAt)
+	encodedInput, signals, causationID, err := prepareRiskAssessment(previous, next, input, evaluation, causationEventID, assessedAt)
 	if err != nil {
 		return err
 	}
@@ -146,7 +147,7 @@ func StoreRiskAssessmentTx(
 		next.Version(),
 		causationID,
 		evaluation.PolicyVersion(),
-		input,
+		encodedInput,
 		evaluation.Score(),
 		evaluation.Decision().String(),
 		signals,
@@ -248,6 +249,7 @@ func (r lifecycleRecord) lifecycle() (transferdomain.Lifecycle, error) {
 func prepareRiskAssessment(
 	previous transferdomain.Lifecycle,
 	next transferdomain.Lifecycle,
+	input riskdomain.Input,
 	evaluation riskdomain.Evaluation,
 	causationEventID string,
 	assessedAt time.Time,
@@ -258,6 +260,7 @@ func prepareRiskAssessment(
 	}
 	if assessedAt.IsZero() || previous.Status() != transferdomain.StatusPendingRisk ||
 		previous.Transfer().ID() != next.Transfer().ID() ||
+		input.Amount != previous.Transfer().Amount() || input.VelocityTransferCount < 0 ||
 		previous.RiskPolicyVersion() != next.RiskPolicyVersion() ||
 		next.Version() != previous.Version()+1 ||
 		evaluation.PolicyVersion() != previous.RiskPolicyVersion() ||
@@ -265,12 +268,16 @@ func prepareRiskAssessment(
 		return nil, nil, pgtype.UUID{}, fmt.Errorf("%w: risk assessment transition", ErrInvalidArgument)
 	}
 
-	input, err := json.Marshal(struct {
-		AmountMinor int64  `json:"amount_minor"`
-		Currency    string `json:"currency"`
+	encodedInput, err := json.Marshal(struct {
+		AmountMinor           int64  `json:"amount_minor"`
+		Currency              string `json:"currency"`
+		VelocityTransferCount int    `json:"velocity_transfer_count"`
+		VelocityDegraded      bool   `json:"velocity_degraded"`
 	}{
-		AmountMinor: previous.Transfer().Amount().MinorUnits(),
-		Currency:    previous.Transfer().Amount().Currency().String(),
+		AmountMinor:           input.Amount.MinorUnits(),
+		Currency:              input.Amount.Currency().String(),
+		VelocityTransferCount: input.VelocityTransferCount,
+		VelocityDegraded:      input.VelocityDegraded,
 	})
 	if err != nil {
 		return nil, nil, pgtype.UUID{}, fmt.Errorf("encoding risk assessment input: %w", err)
@@ -294,7 +301,7 @@ func prepareRiskAssessment(
 		return nil, nil, pgtype.UUID{}, fmt.Errorf("encoding risk assessment signals: %w", err)
 	}
 
-	return input, encodedSignalsJSON, causationID, nil
+	return encodedInput, encodedSignalsJSON, causationID, nil
 }
 
 func lifecycleStatus(value string) (transferdomain.Status, bool) {
