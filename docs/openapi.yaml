@@ -37,7 +37,8 @@ paths:
       operationId: decideReviewCase
       description: |
         Requires a verified OIDC Bearer token with the configured audience, a
-        nonempty subject, and the `analyst` value in the configured role claim.
+        nonempty subject, and the `analyst` value in the configured role claim. The
+        command is rate limited per verified subject within one wallet-api process.
       security:
         - bearerAuth: []
       parameters:
@@ -83,6 +84,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: The review case is no longer open.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: The verified principal exceeded the review-decision command limit.
           content:
             application/json:
               schema:

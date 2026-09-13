@@ -19,14 +19,16 @@ func TestNewRejectsNilDependencies(t *testing.T) {
 		name          string
 		authenticator authenticator
 		decider       decisionHandler
+		limiter       principalLimiter
 		logger        *slog.Logger
 	}{
-		{name: "missing authenticator", decider: &fakeDecider{}, logger: slog.New(slog.DiscardHandler)},
-		{name: "missing decider", authenticator: &fakeAuthenticator{}, logger: slog.New(slog.DiscardHandler)},
-		{name: "missing logger", authenticator: &fakeAuthenticator{}, decider: &fakeDecider{}},
+		{name: "missing authenticator", decider: &fakeDecider{}, limiter: allowAllLimiter{}, logger: slog.New(slog.DiscardHandler)},
+		{name: "missing decider", authenticator: &fakeAuthenticator{}, limiter: allowAllLimiter{}, logger: slog.New(slog.DiscardHandler)},
+		{name: "missing limiter", authenticator: &fakeAuthenticator{}, decider: &fakeDecider{}, logger: slog.New(slog.DiscardHandler)},
+		{name: "missing logger", authenticator: &fakeAuthenticator{}, decider: &fakeDecider{}, limiter: allowAllLimiter{}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := New(test.authenticator, test.decider, test.logger)
+			_, err := New(test.authenticator, test.decider, test.limiter, test.logger)
 			if !errors.Is(err, ErrInvalidDependency) {
 				t.Errorf("New() error = %v, want ErrInvalidDependency", err)
 			}
@@ -106,7 +108,7 @@ func TestHandlerServeHTTP(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			handler, err := New(&test.auth, &test.decider, slog.New(slog.DiscardHandler))
+			handler, err := New(&test.auth, &test.decider, allowAllLimiter{}, slog.New(slog.DiscardHandler))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -135,6 +137,37 @@ func TestHandlerServeHTTP(t *testing.T) {
 	}
 }
 
+func TestHandlerRejectsRateLimitedPrincipal(t *testing.T) {
+	decider := &fakeDecider{}
+	handler, err := New(
+		&fakeAuthenticator{principal: oidc.Principal{Subject: "analyst-42", Roles: []string{"analyst"}}},
+		decider,
+		denyAllLimiter{},
+		slog.New(slog.DiscardHandler),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/v1/transfers/123e4567-e89b-12d3-a456-426614174000/review-decision",
+		strings.NewReader(`{"decision":"approved"}`),
+	)
+	request.SetPathValue("transferID", "123e4567-e89b-12d3-a456-426614174000")
+	request.Header.Set("Authorization", "Bearer signed-token")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d; body = %q", response.Code, http.StatusTooManyRequests, response.Body.String())
+	}
+	if decider.decision != "" {
+		t.Errorf("decider decision = %q, want no application call", decider.decision)
+	}
+}
+
 type fakeAuthenticator struct {
 	principal oidc.Principal
 	err       error
@@ -155,3 +188,11 @@ func (d *fakeDecider) Decide(_ context.Context, principal reviewcase.TrustedPrin
 	d.decision = decision
 	return d.err
 }
+
+type allowAllLimiter struct{}
+
+func (allowAllLimiter) Allow(string) bool { return true }
+
+type denyAllLimiter struct{}
+
+func (denyAllLimiter) Allow(string) bool { return false }

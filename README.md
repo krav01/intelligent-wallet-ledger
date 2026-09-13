@@ -115,6 +115,7 @@ DATABASE_URL='postgres://wallet:wallet_dev_only@localhost:5432/wallet?sslmode=di
   OIDC_ISSUER='https://issuer.example' \
   OIDC_AUDIENCE='wallet-api' \
   OIDC_ROLE_CLAIM='roles' \
+  REVIEW_DECISION_RATE_LIMIT_PER_MINUTE=12 \
   make run
 ```
 
@@ -130,7 +131,10 @@ curl -i -X POST 'http://localhost:8080/v1/transfers/TRANSFER_ID/review-decision'
 
 The endpoint returns `204 No Content`; it returns `401` for an absent or invalid
 token, `403` for a verified principal without the analyst role, `404` for a missing
-transfer, and `409` when the review case is no longer open.
+transfer, `409` when the review case is no longer open, and `429` when the verified
+principal exceeds the command limit. `REVIEW_DECISION_RATE_LIMIT_PER_MINUTE` defaults
+to 12 and accepts values from 1 through 600. The limiter is local to one wallet-api
+process; use a shared limiter before deploying multiple replicas.
 
 ## Architecture
 
@@ -155,6 +159,8 @@ Analyst + Bearer JWT
 wallet-api -- discovery / JWKS --> configured OIDC issuer
         |
         | verified subject + analyst role
+        v
+per-process principal rate limiter
         v
 review-case transaction --> lifecycle + review case + audit record + outbox event
                                                                 |
