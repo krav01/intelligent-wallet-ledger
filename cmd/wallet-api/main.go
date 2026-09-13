@@ -15,7 +15,10 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 
-	err := walletapi.Run(ctx, walletapi.ConfigFromEnv(), logger)
+	config, err := walletapi.ConfigFromEnv()
+	if err == nil {
+		err = walletapi.Run(ctx, config, logger)
+	}
 	stop()
 	if err != nil {
 		logger.Error("wallet API stopped", "error", err)

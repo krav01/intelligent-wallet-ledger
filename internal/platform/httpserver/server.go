@@ -16,11 +16,16 @@ const (
 	maxHeaderBytes    = 64 << 10
 )
 
+// RouteRegistrar adds application-specific routes to the shared server mux.
+type RouteRegistrar interface {
+	RegisterRoutes(*http.ServeMux)
+}
+
 // New creates a hardened HTTP server with operational endpoints.
-func New(address string, logger *slog.Logger) *http.Server {
+func New(address string, logger *slog.Logger, routes RouteRegistrar) *http.Server {
 	return &http.Server{
 		Addr:              address,
-		Handler:           Handler(logger),
+		Handler:           Handler(logger, routes),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
@@ -30,10 +35,13 @@ func New(address string, logger *slog.Logger) *http.Server {
 }
 
 // Handler returns the wallet API HTTP routes.
-func Handler(logger *slog.Logger) http.Handler {
+func Handler(logger *slog.Logger, routes RouteRegistrar) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", health)
 	mux.HandleFunc("GET /readyz", health)
+	if routes != nil {
+		routes.RegisterRoutes(mux)
+	}
 
 	return requestLogger(logger, mux)
 }

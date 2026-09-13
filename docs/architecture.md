@@ -69,7 +69,9 @@ degrades investigation only.
 An analyst review decision appends a durable audit record in the same transaction as
 the lifecycle transition, review-case closure, and outbox event. The record preserves
 the trusted principal subject, decision, lifecycle version, and decision time. It is
-not an authentication or general RBAC implementation.
+not an authentication or general RBAC implementation. When configured, an OIDC
+adapter verifies the Bearer token before it constructs that principal; the domain
+layer still receives neither headers nor raw claims.
 
 ## Verification strategy
 

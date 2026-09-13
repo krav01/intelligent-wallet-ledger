@@ -19,3 +19,4 @@ history.
 - [ADR-0013: AI Investigator privacy boundary](0013-ai-investigator-privacy-boundary.md)
 - [ADR-0014: Read-only ledger reconciliation](0014-read-only-ledger-reconciliation.md)
 - [ADR-0015: Atomic audit records for analyst review decisions](0015-atomic-review-decision-audit.md)
+- [ADR-0016: OIDC-protected analyst review API](0016-oidc-analyst-review-api.md)
