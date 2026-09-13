@@ -85,7 +85,7 @@ jobs:
       - name: Apply migrations
         run: migrate -path migrations -database "$TEST_DATABASE_URL" up
       - name: Test PostgreSQL adapter
-        run: go test -race -tags=integration -shuffle=on ./internal/...
+        run: go test -p 1 -race -tags=integration -shuffle=on ./internal/...
       - name: Validate reversible latest migration
         run: |
           migrate -path migrations -database "$TEST_DATABASE_URL" down 1
