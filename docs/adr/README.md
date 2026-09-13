@@ -16,3 +16,4 @@ history.
 - [ADR-0010: Redis source-account velocity observations](0010-redis-source-account-velocity.md)
 - [ADR-0011: Durable transfer review cases](0011-durable-transfer-review-cases.md)
 - [ADR-0012: Trusted principals for review decisions](0012-trusted-principal-review-decisions.md)
+- [ADR-0013: AI Investigator privacy boundary](0013-ai-investigator-privacy-boundary.md)
