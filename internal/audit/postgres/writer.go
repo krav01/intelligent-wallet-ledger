@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// ErrInvalidArgument indicates malformed audit input or a missing transaction.
 var ErrInvalidArgument = errors.New("audit repository: invalid argument")
 
 const insertReviewDecisionQuery = `
