@@ -10,7 +10,7 @@ import (
 func TestNewConfiguresHeaderLimit(t *testing.T) {
 	t.Parallel()
 
-	server := New("127.0.0.1:8080", slog.New(slog.DiscardHandler))
+	server := New("127.0.0.1:8080", slog.New(slog.DiscardHandler), nil)
 	if server.MaxHeaderBytes != maxHeaderBytes {
 		t.Errorf("MaxHeaderBytes = %d, want %d", server.MaxHeaderBytes, maxHeaderBytes)
 	}
@@ -30,7 +30,7 @@ func TestHandler(t *testing.T) {
 		{name: "unknown route", path: "/unknown", statusCode: http.StatusNotFound, body: "404 page not found\n"},
 	}
 
-	handler := Handler(slog.New(slog.DiscardHandler))
+	handler := Handler(slog.New(slog.DiscardHandler), nil)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()

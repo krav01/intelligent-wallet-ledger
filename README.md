@@ -106,6 +106,32 @@ and runs tagged integration tests for the approved posting and insufficient-fund
 failure paths. It does not claim an HTTP transfer command yet; that API surface is a
 separate delivery slice.
 
+To enable the analyst review command, configure one trusted OIDC issuer alongside
+the wallet database. All OIDC settings are required together; without them the API
+continues to expose only its operational endpoints.
+
+```bash
+DATABASE_URL='postgres://wallet:wallet_dev_only@localhost:5432/wallet?sslmode=disable' \
+  OIDC_ISSUER='https://issuer.example' \
+  OIDC_AUDIENCE='wallet-api' \
+  OIDC_ROLE_CLAIM='roles' \
+  make run
+```
+
+An OIDC token containing the configured audience, a nonempty `sub`, and the
+`analyst` role may decide an open review case:
+
+```bash
+curl -i -X POST 'http://localhost:8080/v1/transfers/TRANSFER_ID/review-decision' \
+  -H 'Authorization: Bearer OIDC_TOKEN' \
+  -H 'Content-Type: application/json' \
+  --data '{"decision":"approved"}'
+```
+
+The endpoint returns `204 No Content`; it returns `401` for an absent or invalid
+token, `403` for a verified principal without the analyst role, `404` for a missing
+transfer, and `409` when the review case is no longer open.
+
 ## Architecture
 
 The repository is a modular Go system with small deployable applications. Bounded
