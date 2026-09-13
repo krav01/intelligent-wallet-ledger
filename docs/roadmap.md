@@ -27,7 +27,8 @@ is small and coherent.
 10. Reconciliation, audit trail, RBAC, and API abuse protection.
 	- [x] Read-only ledger reconciliation report for balance snapshot drift.
 	- [x] Atomic audit trail for analyst review decisions.
-	- [ ] RBAC and API abuse protection.
+	- [x] HTTP request-header size limit for abuse protection.
+	- [ ] RBAC and command-level API abuse protection.
 11. OpenTelemetry, Prometheus/Grafana, failure injection, and recovery tests.
 12. k6 measurements, Kubernetes/Helm, threat model, runbooks, and portfolio polish.
 

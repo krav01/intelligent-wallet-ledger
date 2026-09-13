@@ -13,6 +13,7 @@ const (
 	readTimeout       = 5 * time.Second
 	writeTimeout      = 10 * time.Second
 	idleTimeout       = 60 * time.Second
+	maxHeaderBytes    = 64 << 10
 )
 
 // New creates a hardened HTTP server with operational endpoints.
@@ -24,6 +25,7 @@ func New(address string, logger *slog.Logger) *http.Server {
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
 		IdleTimeout:       idleTimeout,
+		MaxHeaderBytes:    maxHeaderBytes,
 	}
 }
 
