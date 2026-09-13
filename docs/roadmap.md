@@ -31,6 +31,7 @@ is small and coherent.
 	- [x] OIDC analyst role enforcement and per-principal command-level API abuse protection.
 11. OpenTelemetry, Prometheus/Grafana, failure injection, and recovery tests.
 	- [x] Bounded Prometheus HTTP traffic and latency metrics.
+	- [x] OpenTelemetry HTTP trace-context propagation.
 12. k6 measurements, Kubernetes/Helm, threat model, runbooks, and portfolio polish.
 
 The first public demo is complete when it visibly proves balanced postings, safe

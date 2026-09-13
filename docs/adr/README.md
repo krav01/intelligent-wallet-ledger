@@ -22,3 +22,4 @@ history.
 - [ADR-0016: OIDC-protected analyst review API](0016-oidc-analyst-review-api.md)
 - [ADR-0017: Per-principal review-decision rate limiting](0017-per-principal-review-decision-rate-limiting.md)
 - [ADR-0018: Bounded Prometheus HTTP metrics](0018-http-prometheus-metrics.md)
+- [ADR-0019: OpenTelemetry HTTP trace propagation](0019-otel-http-trace-propagation.md)
