@@ -66,6 +66,11 @@ pseudonymous structured context and returns an explanation for a human analyst. 
 output is never consumed by a command that changes financial state. AI unavailability
 degrades investigation only.
 
+An analyst review decision appends a durable audit record in the same transaction as
+the lifecycle transition, review-case closure, and outbox event. The record preserves
+the trusted principal subject, decision, lifecycle version, and decision time. It is
+not an authentication or general RBAC implementation.
+
 ## Verification strategy
 
 Domain tests prove balancing and idempotency invariants. Integration tests exercise

@@ -18,3 +18,4 @@ history.
 - [ADR-0012: Trusted principals for review decisions](0012-trusted-principal-review-decisions.md)
 - [ADR-0013: AI Investigator privacy boundary](0013-ai-investigator-privacy-boundary.md)
 - [ADR-0014: Read-only ledger reconciliation](0014-read-only-ledger-reconciliation.md)
+- [ADR-0015: Atomic audit records for analyst review decisions](0015-atomic-review-decision-audit.md)

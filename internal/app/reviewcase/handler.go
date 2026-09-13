@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	auditpostgres "github.com/krav01/intelligent-wallet-ledger/internal/audit/postgres"
 	outboxpostgres "github.com/krav01/intelligent-wallet-ledger/internal/outbox/postgres"
 	transferdomain "github.com/krav01/intelligent-wallet-ledger/internal/transfer/domain"
 	transferevents "github.com/krav01/intelligent-wallet-ledger/internal/transfer/events"
@@ -93,6 +94,15 @@ func (h *Handler) Decide(ctx context.Context, principal TrustedPrincipal, transf
 		return err
 	}
 	if err := transferpostgres.DecideReviewCaseTx(ctx, tx, transferID, string(decision), principal.Subject, decidedAt); err != nil {
+		return err
+	}
+	if err := auditpostgres.AppendReviewDecisionTx(ctx, tx, auditpostgres.ReviewDecision{
+		TransferID:       transferID,
+		LifecycleVersion: next.Version(),
+		Decision:         string(decision),
+		ActorSubject:     principal.Subject,
+		OccurredAt:       decidedAt,
+	}); err != nil {
 		return err
 	}
 	draft, err := transferevents.ReviewDecided(next, principal.Subject, decidedAt)

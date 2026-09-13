@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	auditpostgres "github.com/krav01/intelligent-wallet-ledger/internal/audit/postgres"
 	ledgerdomain "github.com/krav01/intelligent-wallet-ledger/internal/ledger/domain"
 	ledgerpostgres "github.com/krav01/intelligent-wallet-ledger/internal/ledger/postgres"
 	outboxpostgres "github.com/krav01/intelligent-wallet-ledger/internal/outbox/postgres"
@@ -424,6 +425,15 @@ func TestStoreRiskAssessmentTx(t *testing.T) {
 	if err := transferpostgres.DecideReviewCaseTx(t.Context(), tx, pending.ID(), "approved", "analyst-1", decidedAt); err != nil {
 		t.Fatalf("deciding review case: %v", err)
 	}
+	if err := auditpostgres.AppendReviewDecisionTx(t.Context(), tx, auditpostgres.ReviewDecision{
+		TransferID:       pending.ID(),
+		LifecycleVersion: approved.Version(),
+		Decision:         "approved",
+		ActorSubject:     "analyst-1",
+		OccurredAt:       decidedAt,
+	}); err != nil {
+		t.Fatalf("appending review audit record: %v", err)
+	}
 	if err := tx.Commit(t.Context()); err != nil {
 		t.Fatalf("committing review decision: %v", err)
 	}
@@ -440,6 +450,21 @@ func TestStoreRiskAssessmentTx(t *testing.T) {
 	}
 	if status != "approved" || version != 3 || caseStatus != "approved" || decision != "approved" || decidedBy != "analyst-1" || !openedAt.Equal(decidedAt) {
 		t.Errorf("persisted review decision = (%q, %d, %q, %q, %q, %s), want approved lifecycle and case", status, version, caseStatus, decision, decidedBy, openedAt)
+	}
+	var auditVersion int64
+	var auditDecision, auditSubject string
+	var auditOccurredAt time.Time
+	if err := fixture.pool.QueryRow(
+		t.Context(),
+		`SELECT lifecycle_version, decision, actor_subject, occurred_at
+		 FROM transfer_review_audit_records
+		 WHERE transfer_id = $1`,
+		pending.ID(),
+	).Scan(&auditVersion, &auditDecision, &auditSubject, &auditOccurredAt); err != nil {
+		t.Fatalf("selecting transfer review audit record: %v", err)
+	}
+	if auditVersion != 3 || auditDecision != "approved" || auditSubject != "analyst-1" || !auditOccurredAt.Equal(decidedAt) {
+		t.Errorf("audit record = (%d, %q, %q, %s), want approved analyst decision", auditVersion, auditDecision, auditSubject, auditOccurredAt)
 	}
 }
 
@@ -882,6 +907,16 @@ func (f *fixture) assertJournalEntryCount(t testing.TB, entryID string, want int
 func (f *fixture) cleanup(t testing.TB) {
 	t.Helper()
 	ctx := context.Background()
+	if _, err := f.pool.Exec(
+		ctx,
+		`DELETE FROM transfer_review_audit_records
+         WHERE transfer_id IN (
+               SELECT id FROM transfers WHERE source_account_id = ANY($1::uuid[])
+         )`,
+		f.accountIDs,
+	); err != nil {
+		t.Errorf("cleaning transfer review audit records: %v", err)
+	}
 	if _, err := f.pool.Exec(
 		ctx,
 		`DELETE FROM outbox_events
