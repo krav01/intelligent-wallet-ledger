@@ -31,6 +31,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Health'
+  /metrics:
+    get:
+      summary: Expose Prometheus HTTP metrics
+      operationId: getMetrics
+      description: |
+        Exposes Prometheus text-format process metrics. Labels use registered route
+        patterns, never raw paths or principal identifiers.
+      responses:
+        '200':
+          description: Prometheus text exposition format.
+          content:
+            text/plain:
+              schema:
+                type: string
   /v1/transfers/{transferID}/review-decision:
     post:
       summary: Decide an open transfer review case
