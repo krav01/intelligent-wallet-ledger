@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+func TestNewConfiguresHeaderLimit(t *testing.T) {
+	t.Parallel()
+
+	server := New("127.0.0.1:8080", slog.New(slog.DiscardHandler))
+	if server.MaxHeaderBytes != maxHeaderBytes {
+		t.Errorf("MaxHeaderBytes = %d, want %d", server.MaxHeaderBytes, maxHeaderBytes)
+	}
+}
+
 func TestHandler(t *testing.T) {
 	t.Parallel()
 
