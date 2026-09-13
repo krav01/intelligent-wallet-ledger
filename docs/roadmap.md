@@ -28,7 +28,7 @@ is small and coherent.
 	- [x] Read-only ledger reconciliation report for balance snapshot drift.
 	- [x] Atomic audit trail for analyst review decisions.
 	- [x] HTTP request-header size limit for abuse protection.
-	- [ ] RBAC and command-level API abuse protection.
+	- [x] OIDC analyst role enforcement and per-principal command-level API abuse protection.
 11. OpenTelemetry, Prometheus/Grafana, failure injection, and recovery tests.
 12. k6 measurements, Kubernetes/Helm, threat model, runbooks, and portfolio polish.
 

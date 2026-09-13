@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,15 +20,17 @@ import (
 )
 
 const (
-	defaultAddress  = ":8080"
-	shutdownTimeout = 10 * time.Second
+	defaultAddress                          = ":8080"
+	shutdownTimeout                         = 10 * time.Second
+	defaultReviewDecisionRateLimitPerMinute = 12
 )
 
 // Config contains process-level configuration for the wallet API.
 type Config struct {
-	Address     string
-	DatabaseURL string
-	OIDC        OIDCConfig
+	Address                          string
+	DatabaseURL                      string
+	OIDC                             OIDCConfig
+	ReviewDecisionRateLimitPerMinute int
 }
 
 // OIDCConfig enables analyst command authentication when it is complete.
@@ -48,9 +51,14 @@ func ConfigFromEnv() (Config, error) {
 	if address == "" {
 		address = defaultAddress
 	}
+	rateLimit, err := reviewDecisionRateLimitFromEnv()
+	if err != nil {
+		return Config{}, err
+	}
 	config := Config{
-		Address:     address,
-		DatabaseURL: strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		Address:                          address,
+		DatabaseURL:                      strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		ReviewDecisionRateLimitPerMinute: rateLimit,
 		OIDC: OIDCConfig{
 			Issuer:    strings.TrimSpace(os.Getenv("OIDC_ISSUER")),
 			Audience:  strings.TrimSpace(os.Getenv("OIDC_AUDIENCE")),
@@ -109,6 +117,9 @@ func Run(ctx context.Context, cfg Config, logger *slog.Logger) error {
 }
 
 func validateOIDCConfig(config Config) error {
+	if rateLimit := config.reviewDecisionRateLimit(); rateLimit < 1 || rateLimit > 600 {
+		return errors.New("review decision rate limit must be between 1 and 600 per minute")
+	}
 	if config.OIDC.Enabled() {
 		if config.DatabaseURL == "" {
 			return errors.New("database URL is required when OIDC is configured")
@@ -119,6 +130,25 @@ func validateOIDCConfig(config Config) error {
 		return errors.New("oidc issuer, audience, and role claim must be configured together")
 	}
 	return nil
+}
+
+func (c Config) reviewDecisionRateLimit() int {
+	if c.ReviewDecisionRateLimitPerMinute == 0 {
+		return defaultReviewDecisionRateLimitPerMinute
+	}
+	return c.ReviewDecisionRateLimitPerMinute
+}
+
+func reviewDecisionRateLimitFromEnv() (int, error) {
+	value := strings.TrimSpace(os.Getenv("REVIEW_DECISION_RATE_LIMIT_PER_MINUTE"))
+	if value == "" {
+		return defaultReviewDecisionRateLimitPerMinute, nil
+	}
+	limit, err := strconv.Atoi(value)
+	if err != nil || limit < 1 || limit > 600 {
+		return 0, errors.New("review decision rate limit must be between 1 and 600 per minute")
+	}
+	return limit, nil
 }
 
 func reviewDecisionRoutes(ctx context.Context, cfg Config, logger *slog.Logger) (httpserver.RouteRegistrar, func(), error) {
@@ -140,7 +170,12 @@ func reviewDecisionRoutes(ctx context.Context, cfg Config, logger *slog.Logger) 
 		closePool()
 		return nil, nil, fmt.Errorf("creating review decision handler: %w", err)
 	}
-	routes, err := reviewdecisionhttp.New(authenticator, decider, logger)
+	limiter, err := reviewdecisionhttp.NewPrincipalRateLimiter(cfg.reviewDecisionRateLimit(), time.Now)
+	if err != nil {
+		closePool()
+		return nil, nil, fmt.Errorf("creating review decision rate limiter: %w", err)
+	}
+	routes, err := reviewdecisionhttp.New(authenticator, decider, limiter, logger)
 	if err != nil {
 		closePool()
 		return nil, nil, fmt.Errorf("creating review decision HTTP handler: %w", err)

@@ -42,8 +42,28 @@ func TestConfigFromEnvLoadsOIDC(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.DatabaseURL != "postgres://wallet.example/db" || !cfg.OIDC.Enabled() ||
-		cfg.OIDC.Issuer != "https://issuer.example" || cfg.OIDC.Audience != "wallet-api" || cfg.OIDC.RoleClaim != "roles" {
+		cfg.OIDC.Issuer != "https://issuer.example" || cfg.OIDC.Audience != "wallet-api" || cfg.OIDC.RoleClaim != "roles" ||
+		cfg.ReviewDecisionRateLimitPerMinute != defaultReviewDecisionRateLimitPerMinute {
 		t.Errorf("ConfigFromEnv() = %+v, want normalized OIDC configuration", cfg)
+	}
+}
+
+func TestConfigFromEnvLoadsReviewDecisionRateLimit(t *testing.T) {
+	t.Setenv("REVIEW_DECISION_RATE_LIMIT_PER_MINUTE", " 24 ")
+
+	cfg, err := ConfigFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReviewDecisionRateLimitPerMinute != 24 {
+		t.Errorf("ReviewDecisionRateLimitPerMinute = %d, want 24", cfg.ReviewDecisionRateLimitPerMinute)
+	}
+}
+
+func TestConfigFromEnvRejectsInvalidReviewDecisionRateLimit(t *testing.T) {
+	t.Setenv("REVIEW_DECISION_RATE_LIMIT_PER_MINUTE", "0")
+	if _, err := ConfigFromEnv(); err == nil {
+		t.Fatal("ConfigFromEnv() error = nil, want rate-limit configuration error")
 	}
 }
 

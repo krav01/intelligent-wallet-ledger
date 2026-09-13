@@ -29,19 +29,24 @@ type decisionHandler interface {
 	Decide(context.Context, reviewcase.TrustedPrincipal, string, reviewcase.Decision) error
 }
 
+type principalLimiter interface {
+	Allow(subject string) bool
+}
+
 // Handler authenticates analyst commands and delegates them to the review-case application service.
 type Handler struct {
 	authenticator authenticator
 	decider       decisionHandler
+	limiter       principalLimiter
 	logger        *slog.Logger
 }
 
 // New creates a handler that rejects all requests unless they contain a verified analyst token.
-func New(authenticator authenticator, decider decisionHandler, logger *slog.Logger) (*Handler, error) {
-	if authenticator == nil || decider == nil || logger == nil {
+func New(authenticator authenticator, decider decisionHandler, limiter principalLimiter, logger *slog.Logger) (*Handler, error) {
+	if authenticator == nil || decider == nil || limiter == nil || logger == nil {
 		return nil, ErrInvalidDependency
 	}
-	return &Handler{authenticator: authenticator, decider: decider, logger: logger}, nil
+	return &Handler{authenticator: authenticator, decider: decider, limiter: limiter, logger: logger}, nil
 }
 
 // RegisterRoutes adds the analyst decision endpoint to a server mux.
@@ -68,6 +73,10 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if !hasRole(principal.Roles, reviewcase.RoleAnalyst) {
 		writeError(writer, http.StatusForbidden, "analyst role is required")
+		return
+	}
+	if !h.limiter.Allow(principal.Subject) {
+		writeError(writer, http.StatusTooManyRequests, "review decision rate limit exceeded")
 		return
 	}
 	decision, err := decodeDecision(writer, request)
