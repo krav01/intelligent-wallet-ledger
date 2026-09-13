@@ -25,6 +25,8 @@ is small and coherent.
 	- [x] Analyst decision authorization through a trusted-principal application boundary.
 9. [x] AI Investigator port, mock provider, privacy boundary, and provider-failure tests.
 10. Reconciliation, audit trail, RBAC, and API abuse protection.
+	- [x] Read-only ledger reconciliation report for balance snapshot drift.
+	- [ ] Audit trail, RBAC, and API abuse protection.
 11. OpenTelemetry, Prometheus/Grafana, failure injection, and recovery tests.
 12. k6 measurements, Kubernetes/Helm, threat model, runbooks, and portfolio polish.
 

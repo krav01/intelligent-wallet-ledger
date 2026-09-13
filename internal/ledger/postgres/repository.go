@@ -96,7 +96,27 @@ SELECT EXISTS (
     FROM journal_entries
     WHERE reverses_entry_id = $1
 )`
+
+	selectBalanceDiscrepanciesQuery = `
+WITH ledger_totals AS (
+    SELECT account_id, currency, SUM(amount_minor)::text AS ledger_minor
+    FROM postings
+    GROUP BY account_id, currency
 )
+SELECT b.account_id::text, b.currency, COALESCE(l.ledger_minor, '0'), b.balance_minor::text
+FROM account_balances AS b
+LEFT JOIN ledger_totals AS l ON l.account_id = b.account_id AND l.currency = b.currency
+WHERE COALESCE(l.ledger_minor, '0') <> b.balance_minor::text
+ORDER BY b.account_id, b.currency`
+)
+
+// BalanceDiscrepancy describes one snapshot that differs from immutable postings.
+type BalanceDiscrepancy struct {
+	AccountID     string
+	Currency      string
+	LedgerMinor   string
+	SnapshotMinor string
+}
 
 // Repository stores ledger entries and updates account snapshots in one transaction.
 type Repository struct {
@@ -188,6 +208,35 @@ func (r *Repository) Get(ctx context.Context, entryID string) (result domain.Jou
 		return domain.JournalEntry{}, fmt.Errorf("committing ledger read transaction: %w", err)
 	}
 
+	return result, nil
+}
+
+// Reconcile returns every balance snapshot that differs from its immutable postings.
+// It is read-only and never attempts automatic correction.
+func (r *Repository) Reconcile(ctx context.Context) (result []BalanceDiscrepancy, err error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, fmt.Errorf("beginning reconciliation read: %w", err)
+	}
+	defer finishTransaction(ctx, tx, &err)
+	rows, err := tx.Query(ctx, selectBalanceDiscrepanciesQuery)
+	if err != nil {
+		return nil, fmt.Errorf("querying balance discrepancies: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var discrepancy BalanceDiscrepancy
+		if err := rows.Scan(&discrepancy.AccountID, &discrepancy.Currency, &discrepancy.LedgerMinor, &discrepancy.SnapshotMinor); err != nil {
+			return nil, fmt.Errorf("scanning balance discrepancy: %w", err)
+		}
+		result = append(result, discrepancy)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating balance discrepancies: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("committing reconciliation read: %w", err)
+	}
 	return result, nil
 }
 

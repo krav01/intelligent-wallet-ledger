@@ -47,6 +47,39 @@ func TestPostTxUsesCallerTransaction(t *testing.T) {
 	fixture.assertBalance(t, customerAccount, 0, 0)
 }
 
+func TestRepositoryReconcileReportsOnlyDiscrepantSnapshots(t *testing.T) {
+	fixture := newFixture(t)
+	repository := mustRepository(t, fixture.pool)
+	systemAccount := fixture.createAccount(t, "USD", "system")
+	customerAccount := fixture.createAccount(t, "USD", "customer")
+	entryID := fixture.newUUID(t)
+	fixture.trackEntry(entryID)
+	entry := mustEntry(t, entryID, []domain.Posting{
+		mustPosting(t, systemAccount, -100, "USD"),
+		mustPosting(t, customerAccount, 100, "USD"),
+	})
+	if err := repository.Post(t.Context(), entry); err != nil {
+		t.Fatalf("Repository.Post() error = %v", err)
+	}
+	discrepancies, err := repository.Reconcile(t.Context())
+	if err != nil {
+		t.Fatalf("Repository.Reconcile() error = %v", err)
+	}
+	if len(discrepancies) != 0 {
+		t.Fatalf("Reconcile() = %+v, want no discrepancies", discrepancies)
+	}
+	if _, err := fixture.pool.Exec(t.Context(), `UPDATE account_balances SET balance_minor = -99 WHERE account_id = $1`, systemAccount); err != nil {
+		t.Fatalf("corrupting test snapshot: %v", err)
+	}
+	discrepancies, err = repository.Reconcile(t.Context())
+	if err != nil {
+		t.Fatalf("Repository.Reconcile(corrupt) error = %v", err)
+	}
+	if len(discrepancies) != 1 || discrepancies[0].AccountID != systemAccount || discrepancies[0].Currency != "USD" || discrepancies[0].LedgerMinor != "-100" || discrepancies[0].SnapshotMinor != "-99" {
+		t.Errorf("Reconcile(corrupt) = %+v, want system-account discrepancy", discrepancies)
+	}
+}
+
 func TestRepositoryPostGetAndReverse(t *testing.T) {
 	fixture := newFixture(t)
 	repository := mustRepository(t, fixture.pool)
