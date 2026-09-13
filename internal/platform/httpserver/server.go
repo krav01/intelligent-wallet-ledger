@@ -57,9 +57,13 @@ func requestLogger(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
 		next.ServeHTTP(w, r)
+		route := r.Pattern
+		if route == "" {
+			route = "unmatched"
+		}
 		logger.InfoContext(r.Context(), "HTTP request",
 			"method", r.Method,
-			"path", r.URL.Path,
+			"route", route,
 			"duration", time.Since(started),
 		)
 	})

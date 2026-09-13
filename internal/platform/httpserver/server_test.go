@@ -1,9 +1,11 @@
 package httpserver
 
 import (
+	"bytes"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -13,6 +15,22 @@ func TestNewConfiguresHeaderLimit(t *testing.T) {
 	server := New("127.0.0.1:8080", slog.New(slog.DiscardHandler), nil)
 	if server.MaxHeaderBytes != maxHeaderBytes {
 		t.Errorf("MaxHeaderBytes = %d, want %d", server.MaxHeaderBytes, maxHeaderBytes)
+	}
+}
+
+func TestHandlerLogsStaticRoute(t *testing.T) {
+	var output bytes.Buffer
+	handler := Handler(slog.New(slog.NewTextHandler(&output, nil)), nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/unknown%0Aforged=true", nil)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if !strings.Contains(output.String(), "route=unmatched") {
+		t.Errorf("log output = %q, want unmatched route", output.String())
+	}
+	if strings.Contains(output.String(), "forged=true") {
+		t.Errorf("log output includes client path: %q", output.String())
 	}
 }
 

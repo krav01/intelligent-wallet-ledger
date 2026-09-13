@@ -146,6 +146,30 @@ Client -> Wallet API -> PostgreSQL + transactional outbox -> Kafka
 Risk signals + prepared history -> AI Investigator -> explanation for analyst
 ```
 
+### Analyst review flow
+
+```text
+Analyst + Bearer JWT
+        |
+        v
+wallet-api -- discovery / JWKS --> configured OIDC issuer
+        |
+        | verified subject + analyst role
+        v
+review-case transaction --> lifecycle + review case + audit record + outbox event
+                                                                |
+                                                                v
+                                                        Kafka publisher
+                                                                |
+                                                                v
+                                                     transaction worker --> ledger
+```
+
+The analyst endpoint is registered only when the OIDC issuer, audience, and role
+claim are configured together. A decision is committed only with its audit record
+and durable outbox event; a rejected or unavailable authentication provider does not
+construct a trusted principal.
+
 Core guarantees:
 
 - the immutable double-entry ledger is the financial source of truth;
