@@ -18,7 +18,11 @@ The first foundation slice exposes operational endpoints:
 make run
 curl http://localhost:8080/healthz
 # {"status":"ok"}
+
+curl http://localhost:8080/metrics | rg '^wallet_http_'
 ```
+
+See [observability notes](docs/observability.md) for metric labels and a latency query.
 
 The portfolio checks prove, with tests and observable output, that duplicate requests
 do not double-spend, concurrent withdrawals cannot overdraw an account, and Kafka

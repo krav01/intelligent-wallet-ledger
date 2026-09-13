@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestNewConfiguresHeaderLimit(t *testing.T) {
@@ -64,5 +66,36 @@ func TestHandler(t *testing.T) {
 				t.Fatalf("body = %q, want %q", response.Body.String(), tt.body)
 			}
 		})
+	}
+}
+
+func TestHandlerExposesBoundedRequestMetrics(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	handler := handlerWithRegistry(slog.New(slog.DiscardHandler), nil, registry)
+
+	for _, path := range []string{"/healthz", "/unknown%0Aforged=true"} {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+	}
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d, want %d", response.Code, http.StatusOK)
+	}
+	output := response.Body.String()
+	if !strings.Contains(output, `wallet_http_requests_total{method="GET",route="GET /healthz",status="200"} 1`) {
+		t.Errorf("metrics = %q, want health request counter", output)
+	}
+	if !strings.Contains(output, `wallet_http_request_duration_seconds_count{method="GET",route="GET /healthz",status="200"} 1`) {
+		t.Errorf("metrics = %q, want health duration count", output)
+	}
+	if !strings.Contains(output, `wallet_http_requests_total{method="GET",route="unmatched",status="404"} 1`) {
+		t.Errorf("metrics = %q, want unmatched route counter", output)
+	}
+	if strings.Contains(output, "forged=true") {
+		t.Errorf("metrics include client-controlled path: %q", output)
 	}
 }

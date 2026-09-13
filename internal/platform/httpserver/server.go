@@ -6,6 +6,9 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const (
@@ -36,14 +39,20 @@ func New(address string, logger *slog.Logger, routes RouteRegistrar) *http.Serve
 
 // Handler returns the wallet API HTTP routes.
 func Handler(logger *slog.Logger, routes RouteRegistrar) http.Handler {
+	return handlerWithRegistry(logger, routes, prometheus.NewRegistry())
+}
+
+func handlerWithRegistry(logger *slog.Logger, routes RouteRegistrar, registry *prometheus.Registry) http.Handler {
+	metrics := newHTTPMetrics(registry)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", health)
 	mux.HandleFunc("GET /readyz", health)
+	mux.Handle("GET /metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 	if routes != nil {
 		routes.RegisterRoutes(mux)
 	}
 
-	return requestLogger(logger, mux)
+	return requestLogger(logger, metrics.instrument(mux))
 }
 
 func health(w http.ResponseWriter, _ *http.Request) {
