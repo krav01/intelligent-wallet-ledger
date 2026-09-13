@@ -44,6 +44,9 @@ func NewHandler(pool *pgxpool.Pool, now func() time.Time) (*Handler, error) {
 
 // Handle consumes one risk assessment. Approved transfers are posted; all other valid decisions are recorded as consumed.
 func (h *Handler) Handle(ctx context.Context, envelope event.Envelope) error {
+	if envelope.EventType() == transferevents.ReviewDecidedType {
+		return h.handleReviewDecision(ctx, envelope)
+	}
 	assessment, err := transferevents.ParseRiskAssessed(envelope)
 	if err != nil {
 		return err
@@ -73,8 +76,40 @@ func (h *Handler) Handle(ctx context.Context, envelope event.Envelope) error {
 	if assessment.Decision() != riskdomain.DecisionApprove {
 		return tx.Commit(ctx)
 	}
+	return h.post(ctx, tx, current, envelope.EventID(), h.now().UTC())
+}
 
-	postedAt := h.now().UTC()
+func (h *Handler) handleReviewDecision(ctx context.Context, envelope event.Envelope) error {
+	decision, err := transferevents.ParseReviewDecided(envelope)
+	if err != nil {
+		return err
+	}
+	tx, err := h.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return fmt.Errorf("beginning transaction posting: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	reserved, err := inboxpostgres.ReserveTx(ctx, tx, consumerName, envelope)
+	if err != nil {
+		return err
+	}
+	if !reserved {
+		return tx.Commit(ctx)
+	}
+	current, err := transferpostgres.LoadLifecycleForUpdateTx(ctx, tx, decision.TransferID())
+	if err != nil {
+		return err
+	}
+	if current.Version() != envelope.AggregateVersion() || current.Status().String() != decision.Decision() {
+		return transferpostgres.ErrStateConflict
+	}
+	if decision.Decision() == "declined" {
+		return tx.Commit(ctx)
+	}
+	return h.post(ctx, tx, current, envelope.EventID(), h.now().UTC())
+}
+
+func (h *Handler) post(ctx context.Context, tx pgx.Tx, current transferdomain.Lifecycle, causationID string, postedAt time.Time) error {
 	entry, err := journalEntry(current, postedAt)
 	if err != nil {
 		return err
@@ -83,7 +118,7 @@ func (h *Handler) Handle(ctx context.Context, envelope event.Envelope) error {
 		if !errors.Is(err, ledgerpostgres.ErrInsufficientFunds) {
 			return err
 		}
-		return h.fail(ctx, tx, current, envelope.EventID(), postedAt)
+		return h.fail(ctx, tx, current, causationID, postedAt)
 	}
 	next, err := current.Complete()
 	if err != nil {
@@ -92,7 +127,7 @@ func (h *Handler) Handle(ctx context.Context, envelope event.Envelope) error {
 	if err := transferpostgres.StoreLifecycleTransitionTx(ctx, tx, current, next); err != nil {
 		return err
 	}
-	draft, err := transferevents.CompletedLifecycle(next, postedAt, envelope.EventID())
+	draft, err := transferevents.CompletedLifecycle(next, postedAt, causationID)
 	if err != nil {
 		return err
 	}
