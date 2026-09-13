@@ -66,6 +66,15 @@ INSERT INTO transfer_review_cases (
     opened_at
 )
 VALUES ($1, $2, $3)`
+
+	decideReviewCaseQuery = `
+UPDATE transfer_review_cases
+SET status = $2,
+    decision = $2,
+    decided_by = $3,
+    decided_at = $4
+WHERE transfer_id = $1
+  AND status = 'open'`
 )
 
 // LoadLifecycleForUpdateTx returns one durable lifecycle while holding its row lock.
@@ -110,6 +119,27 @@ func LoadLifecycleForUpdateTx(
 		return transferdomain.Lifecycle{}, err
 	}
 	return lifecycle, nil
+}
+
+// DecideReviewCaseTx closes one open review case inside its caller-owned transaction.
+func DecideReviewCaseTx(ctx context.Context, tx pgx.Tx, transferID, decision, subject string, decidedAt time.Time) error {
+	if tx == nil {
+		return fmt.Errorf("%w: transaction is required", ErrInvalidArgument)
+	}
+	if _, err := parseUUID(transferID); err != nil {
+		return fmt.Errorf("%w: transfer ID: %w", ErrInvalidArgument, err)
+	}
+	if decision != "approved" && decision != "declined" || subject == "" {
+		return ErrInvalidArgument
+	}
+	tag, err := tx.Exec(ctx, decideReviewCaseQuery, transferID, decision, subject, decidedAt.UTC())
+	if err != nil {
+		return fmt.Errorf("deciding transfer review case: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrStateConflict
+	}
+	return nil
 }
 
 // StoreRiskAssessmentTx atomically advances a pending lifecycle and appends its risk assessment.

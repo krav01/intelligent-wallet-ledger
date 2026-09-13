@@ -404,6 +404,43 @@ func TestStoreRiskAssessmentTx(t *testing.T) {
 		storedSignals[0].Contribution != 600 {
 		t.Errorf("stored signals = %+v, want one amount review signal", storedSignals)
 	}
+
+	tx, err = fixture.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatalf("beginning review decision transaction: %v", err)
+	}
+	current, err = transferpostgres.LoadLifecycleForUpdateTx(t.Context(), tx, pending.ID())
+	if err != nil {
+		t.Fatalf("loading review lifecycle: %v", err)
+	}
+	approved, err := current.Approve()
+	if err != nil {
+		t.Fatalf("approving review lifecycle: %v", err)
+	}
+	decidedAt := pending.RequestedAt().Add(time.Minute)
+	if err := transferpostgres.StoreLifecycleTransitionTx(t.Context(), tx, current, approved); err != nil {
+		t.Fatalf("storing review decision lifecycle: %v", err)
+	}
+	if err := transferpostgres.DecideReviewCaseTx(t.Context(), tx, pending.ID(), "approved", "analyst-1", decidedAt); err != nil {
+		t.Fatalf("deciding review case: %v", err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatalf("committing review decision: %v", err)
+	}
+	var decision, decidedBy string
+	if err := fixture.pool.QueryRow(
+		t.Context(),
+		`SELECT t.status, t.state_version, c.status, c.decision, c.decided_by, c.decided_at
+		 FROM transfers AS t
+		 JOIN transfer_review_cases AS c ON c.transfer_id = t.id
+		 WHERE t.id = $1`,
+		pending.ID(),
+	).Scan(&status, &version, &caseStatus, &decision, &decidedBy, &openedAt); err != nil {
+		t.Fatalf("selecting persisted review decision: %v", err)
+	}
+	if status != "approved" || version != 3 || caseStatus != "approved" || decision != "approved" || decidedBy != "analyst-1" || !openedAt.Equal(decidedAt) {
+		t.Errorf("persisted review decision = (%q, %d, %q, %q, %q, %s), want approved lifecycle and case", status, version, caseStatus, decision, decidedBy, openedAt)
+	}
 }
 
 func TestRepositoryFailureDoesNotReserveKey(t *testing.T) {
