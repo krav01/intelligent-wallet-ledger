@@ -20,7 +20,7 @@ var (
 	// ErrInvalidArgument indicates malformed review-decision input or construction.
 	ErrInvalidArgument = errors.New("review case: invalid argument")
 	// ErrUnauthorized indicates a principal without the analyst role.
-	ErrUnauthorized    = errors.New("review case: principal is not an analyst")
+	ErrUnauthorized = errors.New("review case: principal is not an analyst")
 )
 
 // Role identifies a trusted principal's authorization role.
