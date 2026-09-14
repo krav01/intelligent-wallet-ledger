@@ -189,9 +189,10 @@ Core guarantees:
 - asynchronous consumers assume at-least-once delivery and are idempotent;
 - AI is outside the money path and receives minimized, pseudonymous context.
 
-See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and
-[architecture decisions](docs/adr/README.md). The machine-readable HTTP contract is
-[OpenAPI 3.1](docs/openapi.yaml).
+See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
+[architecture decisions](docs/adr/README.md), and the
+[threat model](docs/intelligent-wallet-ledger-threat-model.md). The machine-readable
+HTTP contract is [OpenAPI 3.1](docs/openapi.yaml).
 
 ## Current status
 

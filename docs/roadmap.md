@@ -34,6 +34,7 @@ is small and coherent.
 	- [x] OpenTelemetry HTTP trace-context propagation.
 	- [x] Transaction-worker rollback and redelivery after a recoverable posting failure.
 12. k6 measurements, Kubernetes/Helm, threat model, runbooks, and portfolio polish.
+	- [x] Repository-grounded threat model with deployment assumptions and review paths.
 
 The first public demo is complete when it visibly proves balanced postings, safe
 idempotent replay, no overdraft under concurrent withdrawals, deterministic review of
