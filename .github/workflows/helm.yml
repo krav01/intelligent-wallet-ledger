@@ -1,0 +1,25 @@
+name: Helm
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: azure/setup-helm@v4
+      - name: Lint and render chart
+        run: |
+          chart=deploy/helm/intelligent-wallet-ledger
+          values=(
+            --set image.repository=registry.example/intelligent-wallet-ledger
+            --set image.digest=sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          )
+          helm lint "$chart" "${values[@]}"
+          helm template wallet "$chart" "${values[@]}" >/dev/null

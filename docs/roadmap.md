@@ -37,6 +37,7 @@ is small and coherent.
 	- [x] Repository-grounded threat model with deployment assumptions and review paths.
 	- [x] Operational recovery runbook for dependencies, delivery, and ledger drift.
 	- [x] README evidence map that separates verified claims from unimplemented deployment work.
+	- [x] Digest-pinned Helm workloads with CI rendering and documented deployment boundaries.
 
 The first public demo is complete when it visibly proves balanced postings, safe
 idempotent replay, no overdraft under concurrent withdrawals, deterministic review of

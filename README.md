@@ -197,9 +197,10 @@ See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
 
 ## Current status
 
-Roadmap slices 1 through 11 are implemented, along with the threat model and
-operational runbook from slice 12. The remaining slice-12 work is measured k6 output
-and Kubernetes/Helm deployment artifacts; neither is claimed as complete.
+Roadmap slices 1 through 11 are implemented, along with the threat model, operational
+runbook, and Helm deployment artifacts from slice 12. The remaining slice-12 work is
+measured k6 output. The Helm chart is linted and rendered in CI, but no Kubernetes
+cluster deployment is claimed as complete.
 
 Ledger posting locks accounts in stable order and atomically stores entries, postings,
 balance snapshots, transfer metadata, and a versioned `transfer.completed` outbox event.
@@ -226,10 +227,12 @@ assessment to an atomic ledger posting or an explicit insufficient-funds failure
 | Known reachable dependency vulnerabilities and static issues are checked. | `make vuln`, `make lint`, `make vet` | CI also runs govulncheck, CodeQL, lint, and Go test matrix. |
 
 Load-test measurements are intentionally absent until a pinned k6 runner and a
-repeatable environment are available. Kubernetes and Helm manifests are likewise not
-present; the [threat model](docs/intelligent-wallet-ledger-threat-model.md) and
-[runbook](docs/runbook.md) describe their required deployment controls rather than
-claiming them.
+repeatable environment are available. The
+[Helm chart](deploy/helm/intelligent-wallet-ledger/README.md) deploys the four process
+workloads from immutable image digests and requires process-scoped existing Secrets.
+Its CI validation is static; the [threat model](docs/intelligent-wallet-ledger-threat-model.md)
+and [runbook](docs/runbook.md) remain the source of required cluster controls and
+recovery procedure.
 
 ## Development
 
