@@ -43,4 +43,7 @@ jobs:
           if [ -f wallet-api.pid ]; then
             kill "$(cat wallet-api.pid)" || true
           fi
+      - name: Show wallet API log on failure
+        if: failure()
+        run: |
           cat wallet-api.log || true
