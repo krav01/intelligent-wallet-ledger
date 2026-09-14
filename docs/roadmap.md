@@ -36,6 +36,7 @@ is small and coherent.
 12. k6 measurements, Kubernetes/Helm, threat model, runbooks, and portfolio polish.
 	- [x] Repository-grounded threat model with deployment assumptions and review paths.
 	- [x] Operational recovery runbook for dependencies, delivery, and ledger drift.
+	- [x] README evidence map that separates verified claims from unimplemented deployment work.
 
 The first public demo is complete when it visibly proves balanced postings, safe
 idempotent replay, no overdraft under concurrent withdrawals, deterministic review of
