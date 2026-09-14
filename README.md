@@ -191,8 +191,9 @@ Core guarantees:
 
 See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
 [architecture decisions](docs/adr/README.md), and the
-[threat model](docs/intelligent-wallet-ledger-threat-model.md). The machine-readable
-HTTP contract is [OpenAPI 3.1](docs/openapi.yaml).
+[threat model](docs/intelligent-wallet-ledger-threat-model.md), and the
+[operational recovery runbook](docs/runbook.md). The machine-readable HTTP contract is
+[OpenAPI 3.1](docs/openapi.yaml).
 
 ## Current status
 
