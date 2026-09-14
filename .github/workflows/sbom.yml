@@ -1,0 +1,32 @@
+name: SBOM
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    name: SPDX SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Generate SPDX JSON
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: .
+          format: spdx-json
+          syft-version: v1.51.1
+          output-file: intelligent-wallet-ledger.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Upload SPDX JSON
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: intelligent-wallet-ledger-spdx
+          path: intelligent-wallet-ledger.spdx.json
+          if-no-files-found: error
+          retention-days: 30
