@@ -38,6 +38,7 @@ is small and coherent.
 	- [x] Operational recovery runbook for dependencies, delivery, and ledger drift.
 	- [x] README evidence map that separates verified claims from unimplemented deployment work.
 	- [x] Digest-pinned Helm workloads with CI rendering and documented deployment boundaries.
+	- [x] Repeatable k6 health workload with CI summary and explicit capacity boundaries.
 
 The first public demo is complete when it visibly proves balanced postings, safe
 idempotent replay, no overdraft under concurrent withdrawals, deterministic review of

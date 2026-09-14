@@ -225,9 +225,11 @@ assessment to an atomic ledger posting or an explicit insufficient-funds failure
 | A publisher crash after broker acknowledgement is safe for the consumer effect. | `make demo-outbox` | Requires Docker Compose; republished event is deduplicated by the inbox. |
 | Approved and insufficient-funds transfer posting transitions are visible end to end. | `make demo-transfer` | Requires Docker Compose; starts publisher and both workers. |
 | Known reachable dependency vulnerabilities and static issues are checked. | `make vuln`, `make lint`, `make vet` | CI also runs govulncheck, CodeQL, lint, and Go test matrix. |
+| The public API stays available under a small repeatable workload. | `K6_BASE_URL=http://127.0.0.1:8080 make load-health` | k6 is required locally; CI runs 20 VUs for 15 seconds against its built API and logs the summary. |
 
-Load-test measurements are intentionally absent until a pinned k6 runner and a
-repeatable environment are available. The
+The [k6 health workload](docs/load-testing.md) is executed in CI with a pinned k6
+image version and reports its runner-specific summary in the job log. It is not a
+financial-workflow capacity benchmark. The
 [Helm chart](deploy/helm/intelligent-wallet-ledger/README.md) deploys the four process
 workloads from immutable image digests and requires process-scoped existing Secrets.
 Its CI validation is static; the [threat model](docs/intelligent-wallet-ledger-threat-model.md)

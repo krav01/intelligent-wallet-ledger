@@ -4,7 +4,7 @@ RISK_WORKER_BINARY := bin/risk-worker
 TRANSACTION_WORKER_BINARY := bin/transaction-worker
 GO ?= go
 
-.PHONY: build clean demo-outbox demo-transfer fmt help migrate-down migrate-up run run-publisher run-risk-worker run-transaction-worker test test-integration test-race vet vuln
+.PHONY: build clean demo-outbox demo-transfer fmt help load-health migrate-down migrate-up run run-publisher run-risk-worker run-transaction-worker test test-integration test-race vet vuln
 
 ## build: Build the wallet API.
 build:
@@ -90,3 +90,8 @@ vuln:
 ## help: Show available targets.
 help:
 	@sed -n 's/^## /  /p' $(MAKEFILE_LIST)
+
+## load-health: Run the k6 availability workload against K6_BASE_URL.
+load-health:
+	@test -n "$(K6_BASE_URL)" || (echo "K6_BASE_URL is required"; exit 1)
+	k6 run scripts/k6/healthz.js
