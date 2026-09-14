@@ -197,9 +197,10 @@ See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
 
 ## Current status
 
-Roadmap slices 1 through 7 are implemented: repository foundation, immutable money
-value objects, PostgreSQL-backed wallets, the transactional double-entry ledger, and
-requester-scoped idempotent customer transfers.
+Roadmap slices 1 through 11 are implemented, along with the threat model and
+operational runbook from slice 12. The remaining slice-12 work is measured k6 output
+and Kubernetes/Helm deployment artifacts; neither is claimed as complete.
+
 Ledger posting locks accounts in stable order and atomically stores entries, postings,
 balance snapshots, transfer metadata, and a versioned `transfer.completed` outbox event.
 Successful transfer retries return the original result without another balance effect
@@ -212,6 +213,23 @@ the durable outbox to Kafka with stable aggregate keys and all-ISR acknowledgeme
 the integration suite proves safe redelivery after a lost completion update.
 Risk and transaction workers now advance accepted transfers through deterministic
 assessment to an atomic ledger posting or an explicit insufficient-funds failure.
+
+## Evidence map
+
+| Claim | Reproduce it | Execution boundary |
+| --- | --- | --- |
+| Domain invariants, idempotency, authorization, and HTTP behavior remain deterministic. | `make test` | Local Go toolchain. |
+| Concurrent code has no detected data race. | `make test-race` | Local Go toolchain. |
+| PostgreSQL transactions, Kafka delivery, and worker recovery hold under real adapters. | `make test-integration` | Requires migrated PostgreSQL and Kafka; CI runs this suite. |
+| A publisher crash after broker acknowledgement is safe for the consumer effect. | `make demo-outbox` | Requires Docker Compose; republished event is deduplicated by the inbox. |
+| Approved and insufficient-funds transfer posting transitions are visible end to end. | `make demo-transfer` | Requires Docker Compose; starts publisher and both workers. |
+| Known reachable dependency vulnerabilities and static issues are checked. | `make vuln`, `make lint`, `make vet` | CI also runs govulncheck, CodeQL, lint, and Go test matrix. |
+
+Load-test measurements are intentionally absent until a pinned k6 runner and a
+repeatable environment are available. Kubernetes and Helm manifests are likewise not
+present; the [threat model](docs/intelligent-wallet-ledger-threat-model.md) and
+[runbook](docs/runbook.md) describe their required deployment controls rather than
+claiming them.
 
 ## Development
 
