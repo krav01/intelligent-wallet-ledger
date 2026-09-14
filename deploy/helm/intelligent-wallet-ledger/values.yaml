@@ -1,0 +1,49 @@
+# All workload images must be supplied by digest. The chart intentionally does not
+# provide a mutable image tag default.
+image:
+  repository: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  name: ""
+
+runtimeSecrets:
+  api: wallet-api-runtime
+  outboxPublisher: outbox-publisher-runtime
+  riskWorker: risk-worker-runtime
+  transactionWorker: transaction-worker-runtime
+
+api:
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 8080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+workers:
+  outboxPublisher:
+    replicas: 1
+  riskWorker:
+    replicas: 1
+  transactionWorker:
+    replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+networkPolicy:
+  enabled: false

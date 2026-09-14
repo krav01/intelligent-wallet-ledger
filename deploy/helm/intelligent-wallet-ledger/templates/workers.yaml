@@ -1,0 +1,51 @@
+{{- $root := . }}
+{{- range $worker := list
+  (dict "name" "outbox-publisher" "command" "outbox-publisher" "replicas" $root.Values.workers.outboxPublisher.replicas "secret" $root.Values.runtimeSecrets.outboxPublisher)
+  (dict "name" "risk-worker" "command" "risk-worker" "replicas" $root.Values.workers.riskWorker.replicas "secret" $root.Values.runtimeSecrets.riskWorker)
+  (dict "name" "transaction-worker" "command" "transaction-worker" "replicas" $root.Values.workers.transactionWorker.replicas "secret" $root.Values.runtimeSecrets.transactionWorker) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "intelligent-wallet-ledger.fullname" $root }}-{{ $worker.name }}
+  labels:
+    {{- include "intelligent-wallet-ledger.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $worker.name }}
+spec:
+  replicas: {{ $worker.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "intelligent-wallet-ledger.name" $root }}
+      app.kubernetes.io/instance: {{ $root.Release.Name }}
+      app.kubernetes.io/component: {{ $worker.name }}
+  template:
+    metadata:
+      labels:
+        {{- include "intelligent-wallet-ledger.labels" $root | nindent 8 }}
+        app.kubernetes.io/component: {{ $worker.name }}
+    spec:
+      serviceAccountName: {{ include "intelligent-wallet-ledger.serviceAccountName" $root }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $worker.name }}
+          image: {{ include "intelligent-wallet-ledger.image" $root }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: [{{ $worker.command | quote }}]
+          envFrom:
+            - secretRef:
+                name: {{ required (printf "runtime secret for %s is required" $worker.name) $worker.secret }}
+          resources:
+            {{- toYaml $root.Values.workers.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+{{- end }}
