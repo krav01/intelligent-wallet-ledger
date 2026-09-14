@@ -9,6 +9,9 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestNewConfiguresHeaderLimit(t *testing.T) {
@@ -97,5 +100,37 @@ func TestHandlerExposesBoundedRequestMetrics(t *testing.T) {
 	}
 	if strings.Contains(output, "forged=true") {
 		t.Errorf("metrics include client-controlled path: %q", output)
+	}
+}
+
+func TestHandlerPropagatesTraceParent(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := trace.NewTracerProvider(trace.WithSpanProcessor(recorder))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		_ = provider.Shutdown(t.Context())
+		otel.SetTracerProvider(previous)
+	})
+
+	handler := Handler(slog.New(slog.DiscardHandler), nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil)
+	request.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	spans := recorder.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("ended spans = %d, want 1", len(spans))
+	}
+	if spans[0].Name() != "wallet-api.http" {
+		t.Errorf("span name = %q, want wallet-api.http", spans[0].Name())
+	}
+	if got, want := spans[0].SpanContext().TraceID().String(), "4bf92f3577b34da6a3ce929d0e0e4736"; got != want {
+		t.Errorf("trace ID = %q, want %q", got, want)
+	}
+	if got := spans[0].Attributes(); len(got) != 0 {
+		t.Errorf("span attributes = %v, want none", got)
 	}
 }

@@ -9,6 +9,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -52,7 +55,18 @@ func handlerWithRegistry(logger *slog.Logger, routes RouteRegistrar, registry *p
 		routes.RegisterRoutes(mux)
 	}
 
-	return requestLogger(logger, metrics.instrument(mux))
+	traced := traceContext(metrics.instrument(mux))
+	return requestLogger(logger, traced)
+}
+
+func traceContext(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := propagation.TraceContext{}.Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+		ctx, span := otel.Tracer("wallet-api/http").Start(ctx, "wallet-api.http", trace.WithSpanKind(trace.SpanKindServer))
+		defer span.End()
+
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 func health(w http.ResponseWriter, _ *http.Request) {

@@ -21,4 +21,9 @@ histogram_quantile(
 ```
 
 The metrics endpoint is intentionally not a Prometheus server, Grafana deployment, or
-distributed tracing setup. Those are separate roadmap slices.
+distributed tracing exporter. Those are separate roadmap slices.
+
+`wallet-api` also extracts W3C `traceparent` headers and creates an OpenTelemetry HTTP
+server span named `wallet-api.http` without client-controlled span attributes. The
+application does not configure an exporter; deployment infrastructure must install the
+`TracerProvider` and exporter that match its collector and retention policy.
