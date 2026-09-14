@@ -24,6 +24,23 @@ func TestNewConfiguresHeaderLimit(t *testing.T) {
 }
 
 func TestHandlerLogsStaticRoute(t *testing.T) {
+	t.Parallel()
+
+	var output bytes.Buffer
+	handler := Handler(slog.New(slog.NewTextHandler(&output, nil)), nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if !strings.Contains(output.String(), `route="GET /healthz"`) {
+		t.Errorf("log output = %q, want health route", output.String())
+	}
+}
+
+func TestHandlerLogsUnmatchedRoute(t *testing.T) {
+	t.Parallel()
+
 	var output bytes.Buffer
 	handler := Handler(slog.New(slog.NewTextHandler(&output, nil)), nil)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/unknown%0Aforged=true", nil)
