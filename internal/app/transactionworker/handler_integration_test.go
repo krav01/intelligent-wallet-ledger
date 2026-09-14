@@ -37,6 +37,40 @@ func TestHandlerHandlePostsApprovedTransferOnce(t *testing.T) {
 	fixture.assertBalance(t, lifecycle.Transfer().DestinationAccountID(), 60, 1)
 }
 
+func TestHandlerHandleRecoversAfterPostingFailure(t *testing.T) {
+	fixture := newIntegrationFixture(t)
+	lifecycle, envelope := fixture.approvedAssessment(t, 60, 100)
+
+	if _, err := fixture.pool.Exec(t.Context(), `DELETE FROM account_balances WHERE account_id = $1`, lifecycle.Transfer().SourceAccountID()); err != nil {
+		t.Fatalf("injecting missing source balance: %v", err)
+	}
+	if err := fixture.handler(t).Handle(t.Context(), envelope); err == nil {
+		t.Fatal("Handle() error = nil, want posting failure")
+	}
+
+	fixture.assertLifecycle(t, lifecycle.Transfer().ID(), "approved", 2, "")
+	fixture.assertCount(t, `SELECT count(*) FROM journal_entries WHERE id = $1`, lifecycle.Transfer().ID(), 0)
+	fixture.assertCount(t, `SELECT count(*) FROM outbox_events WHERE aggregate_id = $1 AND event_type = 'transfer.completed'`, lifecycle.Transfer().ID(), 0)
+	fixture.assertCount(t, `SELECT count(*) FROM consumer_inbox WHERE consumer_name = 'transaction-worker.v1' AND event_id = $1`, envelope.EventID(), 0)
+
+	if _, err := fixture.pool.Exec(t.Context(), `INSERT INTO account_balances (account_id, currency, account_type, balance_minor) VALUES ($1, 'USD', 'customer', 100)`, lifecycle.Transfer().SourceAccountID()); err != nil {
+		t.Fatalf("restoring source balance: %v", err)
+	}
+	if err := fixture.handler(t).Handle(t.Context(), envelope); err != nil {
+		t.Fatalf("Handle(recovery) error = %v", err)
+	}
+	if err := fixture.handler(t).Handle(t.Context(), envelope); err != nil {
+		t.Fatalf("Handle(redelivery) error = %v", err)
+	}
+
+	fixture.assertLifecycle(t, lifecycle.Transfer().ID(), "completed", 3, "")
+	fixture.assertCount(t, `SELECT count(*) FROM journal_entries WHERE id = $1`, lifecycle.Transfer().ID(), 1)
+	fixture.assertCount(t, `SELECT count(*) FROM outbox_events WHERE aggregate_id = $1 AND event_type = 'transfer.completed'`, lifecycle.Transfer().ID(), 1)
+	fixture.assertCount(t, `SELECT count(*) FROM consumer_inbox WHERE consumer_name = 'transaction-worker.v1' AND event_id = $1`, envelope.EventID(), 1)
+	fixture.assertBalance(t, lifecycle.Transfer().SourceAccountID(), 40, 1)
+	fixture.assertBalance(t, lifecycle.Transfer().DestinationAccountID(), 60, 1)
+}
+
 func TestHandlerHandleFailsInsufficientFunds(t *testing.T) {
 	fixture := newIntegrationFixture(t)
 	lifecycle, envelope := fixture.approvedAssessment(t, 60, 0)

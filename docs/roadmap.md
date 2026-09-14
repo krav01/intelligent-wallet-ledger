@@ -32,6 +32,7 @@ is small and coherent.
 11. OpenTelemetry, Prometheus/Grafana, failure injection, and recovery tests.
 	- [x] Bounded Prometheus HTTP traffic and latency metrics.
 	- [x] OpenTelemetry HTTP trace-context propagation.
+	- [x] Transaction-worker rollback and redelivery after a recoverable posting failure.
 12. k6 measurements, Kubernetes/Helm, threat model, runbooks, and portfolio polish.
 
 The first public demo is complete when it visibly proves balanced postings, safe
