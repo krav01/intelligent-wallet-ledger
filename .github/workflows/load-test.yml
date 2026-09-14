@@ -1,0 +1,49 @@
+name: Load test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  healthz:
+    name: k6 healthz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build wallet API
+        run: go build -trimpath -o bin/wallet-api ./cmd/wallet-api
+      - name: Start wallet API
+        run: |
+          HTTP_ADDRESS=127.0.0.1:8080 ./bin/wallet-api > wallet-api.log 2>&1 &
+          echo $! > wallet-api.pid
+          for attempt in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:8080/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat wallet-api.log
+          exit 1
+      - name: Run k6 health workload
+        run: |
+          docker run --network host --rm -i \
+            -e K6_BASE_URL=http://127.0.0.1:8080 \
+            grafana/k6:0.54.0 run - < scripts/k6/healthz.js
+      - name: Stop wallet API
+        if: always()
+        run: |
+          if [ -f wallet-api.pid ]; then
+            kill "$(cat wallet-api.pid)" || true
+          fi
+      - name: Show wallet API log on failure
+        if: failure()
+        run: |
+          cat wallet-api.log || true

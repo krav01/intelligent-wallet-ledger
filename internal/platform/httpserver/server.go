@@ -55,8 +55,8 @@ func handlerWithRegistry(logger *slog.Logger, routes RouteRegistrar, registry *p
 		routes.RegisterRoutes(mux)
 	}
 
-	traced := traceContext(metrics.instrument(mux))
-	return requestLogger(logger, traced)
+	logged := requestLogger(logger, metrics.instrument(mux))
+	return traceContext(logged)
 }
 
 func traceContext(next http.Handler) http.Handler {
