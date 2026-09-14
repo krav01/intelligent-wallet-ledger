@@ -43,9 +43,12 @@ func TestHandleRecord(t *testing.T) {
 	}
 	handler := &recordHandler{}
 
-	got, err := handleRecord(t.Context(), handler, encoded)
+	got, handled, err := handleRecord(t.Context(), handler, encoded)
 	if err != nil {
 		t.Fatalf("handleRecord() error = %v", err)
+	}
+	if !handled {
+		t.Fatal("handleRecord() handled = false, want true")
 	}
 	if got.EventID() != envelope.EventID() || handler.envelope.EventID() != envelope.EventID() {
 		t.Errorf("handleRecord() event ID = %q, want %q", got.EventID(), envelope.EventID())
@@ -54,7 +57,7 @@ func TestHandleRecord(t *testing.T) {
 
 func TestHandleRecordDoesNotCallHandlerForInvalidEnvelope(t *testing.T) {
 	handler := &recordHandler{}
-	if _, err := handleRecord(t.Context(), handler, []byte(`{"event_id":"invalid"}`)); err == nil {
+	if _, _, err := handleRecord(t.Context(), handler, []byte(`{"event_id":"invalid"}`)); err == nil {
 		t.Fatal("handleRecord() error = nil, want invalid envelope error")
 	}
 	if handler.called {
@@ -70,8 +73,38 @@ func TestHandleRecordPropagatesHandlerError(t *testing.T) {
 	}
 	want := errors.New("database unavailable")
 	handler := &recordHandler{err: want}
-	if _, err := handleRecord(t.Context(), handler, encoded); !errors.Is(err, want) {
+	if _, _, err := handleRecord(t.Context(), handler, encoded); !errors.Is(err, want) {
 		t.Fatalf("handleRecord() error = %v, want handler error", err)
+	}
+}
+
+func TestHandleRecordIgnoresKnownForeignEvent(t *testing.T) {
+	envelope := knownForeignEnvelope(t, transferevents.RequestedType)
+	encoded, err := envelope.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON() error = %v", err)
+	}
+	handler := &recordHandler{}
+
+	_, handled, err := handleRecord(t.Context(), handler, encoded)
+	if err != nil {
+		t.Fatalf("handleRecord() error = %v", err)
+	}
+	if handled || handler.called {
+		t.Fatal("known foreign event was handled, want ignored")
+	}
+}
+
+func TestQuarantineReason(t *testing.T) {
+	t.Parallel()
+	if reason, ok := quarantineReason(event.ErrInvalidEnvelope); !ok || reason != "invalid_envelope" {
+		t.Errorf("quarantineReason(invalid envelope) = (%q, %t), want (invalid_envelope, true)", reason, ok)
+	}
+	if reason, ok := quarantineReason(errUnsupportedEventType); !ok || reason != "unsupported_event_type" {
+		t.Errorf("quarantineReason(unsupported type) = (%q, %t), want (unsupported_event_type, true)", reason, ok)
+	}
+	if _, ok := quarantineReason(errors.New("database unavailable")); ok {
+		t.Error("quarantineReason(database error) = quarantinable, want false")
 	}
 }
 
@@ -130,6 +163,28 @@ func approvedRiskEnvelope(t testing.TB) event.Envelope {
 		t.Fatalf("RiskAssessed() error = %v", err)
 	}
 	envelope, err := event.NewEnvelope("66666666-6666-4666-8666-666666666666", draft)
+	if err != nil {
+		t.Fatalf("NewEnvelope() error = %v", err)
+	}
+	return envelope
+}
+
+func knownForeignEnvelope(t testing.TB, eventType string) event.Envelope {
+	t.Helper()
+	draft, err := event.NewDraft(event.DraftParams{
+		EventType:        eventType,
+		EventVersion:     1,
+		AggregateType:    "transfer",
+		AggregateID:      "11111111-1111-4111-8111-111111111111",
+		AggregateVersion: 1,
+		CorrelationID:    "11111111-1111-4111-8111-111111111111",
+		OccurredAt:       time.Date(2026, time.September, 15, 0, 0, 0, 0, time.UTC),
+		Payload:          []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("NewDraft() error = %v", err)
+	}
+	envelope, err := event.NewEnvelope("33333333-3333-4333-8333-333333333333", draft)
 	if err != nil {
 		t.Fatalf("NewEnvelope() error = %v", err)
 	}

@@ -54,6 +54,14 @@ provides at-least-once transport; consumers persist `(event_id, consumer_name)` 
 must make duplicate delivery a no-op. Event envelopes carry event, aggregate,
 correlation, and causation identifiers.
 
+Each worker acknowledges valid events owned by another known worker as ignored. An
+invalid envelope, invalid payload for an owned event type, or unknown event type is
+first captured idempotently in `consumer_quarantine`, then its Kafka offset is
+committed. The quarantine row records consumer/topic/partition/offset, a SHA-256
+fingerprint, length, and at most the first 64 KiB of the value; a failed quarantine
+write leaves the offset uncommitted. Operators use the stored Kafka position to
+retrieve a larger source record before broker retention expires.
+
 ## Risk and AI boundary
 
 The risk engine is deterministic and produces a score, signals, and one of approve,

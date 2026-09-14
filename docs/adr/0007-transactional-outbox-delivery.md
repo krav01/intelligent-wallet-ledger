@@ -81,12 +81,16 @@ database transaction as that side effect. If the key already exists, make delive
 no-op. Commit the Kafka offset only after the database transaction commits.
 
 Envelope validation, event-version dispatch, and handler errors occur before offset
-commit. Unknown versions and malformed payloads fail closed rather than being marked
-processed. Poison-event quarantine and dead-letter policy must be settled before a
-production consumer is enabled; this slice does not claim that retry alone is an
-operationally complete policy. Side effects in systems other than PostgreSQL need
-their own idempotency key or reconciliation strategy and are not covered by the inbox
-transaction.
+commit. A valid event owned by another known worker is acknowledged as ignored. An
+invalid envelope, invalid payload for an owned event type, or unknown event type is
+stored idempotently in PostgreSQL quarantine before its offset is committed. The row
+records consumer/topic/partition/offset plus a SHA-256 fingerprint and a value excerpt
+bounded to 64 KiB; a failed quarantine write remains retryable. Operators recover a
+larger source record from Kafka by the stored position before broker retention expires
+and republish a corrected event with a new event ID. Handler infrastructure failures
+and unavailable policy remain uncommitted. Side effects in systems other than
+PostgreSQL need their own idempotency key or reconciliation strategy and are not
+covered by the inbox transaction.
 
 ## Consequences
 
@@ -114,8 +118,7 @@ storage until a later archival policy is accepted.
 
 ## Revisit when
 
-Revisit ordering before emitting multiple events for one aggregate, dead-letter and
-operator replay policy before enabling production consumers, and retention after
-measuring event volume. Revisit the payload privacy boundary before adding identity or
-AI-related events, and the inbox model before a consumer performs non-PostgreSQL side
-effects.
+Revisit ordering before emitting multiple events for one aggregate, quarantine
+retention and event-contract ownership after measuring event volume, and the payload
+privacy boundary before adding identity or AI-related events. Revisit the inbox model
+before a consumer performs non-PostgreSQL side effects.
