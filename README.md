@@ -96,8 +96,9 @@ it never silently approves a transfer.
 
 It commits a Kafka offset only after PostgreSQL atomically reserves the inbox event,
 persists the assessment, transitions the transfer, and writes `transfer.risk_assessed`
-to the outbox. A malformed event or unavailable policy is not acknowledged and is
-delivered again for operator recovery.
+to the outbox. Invalid or unknown events are first captured in an idempotent bounded
+quarantine row; unavailable policy or infrastructure failures remain unacknowledged
+for retry.
 
 Run the complete worker topology and verify the terminal posting transitions:
 

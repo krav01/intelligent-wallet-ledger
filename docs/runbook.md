@@ -124,13 +124,18 @@ Expected worker behavior:
   can be retried after recovery.
 - A successful database transaction reserves `(consumer_name, event_id)`; a redelivery
   then performs no second durable effect.
-- A malformed event or unavailable captured policy fails closed and is not
-  acknowledged. This repository has no dead-letter queue or quarantine workflow.
+- A malformed envelope, malformed payload for an owned event type, or unknown event
+  type is stored idempotently in `consumer_quarantine` before its Kafka offset is
+  acknowledged. A failed quarantine write leaves the offset uncommitted.
+- A known event owned by another worker is acknowledged as ignored. An unavailable
+  captured policy remains retryable and is not acknowledged.
 
-For a malformed or unsupported event, preserve the event ID, topic, partition, offset,
-and error in the incident record. Escalate to the event-contract owner before any
-offset skip or replay decision. Do not modify `consumer_inbox` as a substitute for a
-documented poison-event process.
+For a quarantine alert, identify the row by consumer/topic/partition/offset and record
+the reason code plus SHA-256 value fingerprint. Do not log or paste its value excerpt
+into an incident. Escalate to the event-contract owner, retrieve the source record by
+its stored Kafka position before retention expires when the 64 KiB excerpt is not
+complete, then correct and republish it with a new event ID. Do not delete the
+quarantine row or modify `consumer_inbox` to force replay.
 
 ## Ledger discrepancy
 

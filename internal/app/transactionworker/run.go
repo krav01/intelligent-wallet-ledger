@@ -11,6 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/krav01/intelligent-wallet-ledger/internal/event"
+	quarantinepostgres "github.com/krav01/intelligent-wallet-ledger/internal/quarantine/postgres"
+	transferevents "github.com/krav01/intelligent-wallet-ledger/internal/transfer/events"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
@@ -20,6 +22,8 @@ const (
 	defaultClientID = "intelligent-wallet-ledger-transaction-worker"
 	startupTimeout  = 10 * time.Second
 )
+
+var errUnsupportedEventType = errors.New("transaction worker: unsupported event type")
 
 // Config contains process-level PostgreSQL and Kafka configuration.
 type Config struct {
@@ -79,6 +83,10 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("creating transaction handler: %w", err)
 	}
+	quarantine, err := quarantinepostgres.NewRepository(pool)
+	if err != nil {
+		return fmt.Errorf("creating consumer quarantine repository: %w", err)
+	}
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(config.KafkaBrokers...),
 		kgo.ClientID(defaultClientID),
@@ -97,10 +105,18 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 	cancelStartup()
 
 	logger.Info("transaction worker started", "topic", config.KafkaTopic, "group_id", config.KafkaGroupID)
-	return consume(ctx, client, handler, logger)
+	return consume(ctx, client, handler, quarantine, logger)
 }
 
-func consume(ctx context.Context, client *kgo.Client, handler *Handler, logger *slog.Logger) error {
+type eventHandler interface {
+	Handle(context.Context, event.Envelope) error
+}
+
+type quarantineStore interface {
+	Store(context.Context, quarantinepostgres.Record) error
+}
+
+func consume(ctx context.Context, client *kgo.Client, handler eventHandler, quarantine quarantineStore, logger *slog.Logger) error {
 	for {
 		fetches := client.PollFetches(ctx)
 		if err := ctx.Err(); err != nil {
@@ -110,12 +126,33 @@ func consume(ctx context.Context, client *kgo.Client, handler *Handler, logger *
 			return fmt.Errorf("polling Kafka: %w", err)
 		}
 		for _, record := range fetches.Records() {
-			envelope, err := handleRecord(ctx, handler, record.Value)
+			envelope, handled, err := handleRecord(ctx, handler, record.Value)
 			if err != nil {
+				if reasonCode, quarantinable := quarantineReason(err); quarantinable {
+					if err := quarantine.Store(ctx, quarantinepostgres.Record{
+						ConsumerName: consumerName,
+						Topic:        record.Topic,
+						Partition:    record.Partition,
+						Offset:       record.Offset,
+						ReasonCode:   reasonCode,
+						Value:        record.Value,
+					}); err != nil {
+						return fmt.Errorf("quarantining Kafka record at %s/%d/%d: %w", record.Topic, record.Partition, record.Offset, err)
+					}
+					if err := client.CommitRecords(ctx, record); err != nil {
+						return fmt.Errorf("committing quarantined Kafka record at %s/%d/%d: %w", record.Topic, record.Partition, record.Offset, err)
+					}
+					logger.Warn("transaction event quarantined", "topic", record.Topic, "partition", record.Partition, "offset", record.Offset, "reason_code", reasonCode)
+					continue
+				}
 				return fmt.Errorf("handling Kafka record at %s/%d/%d: %w", record.Topic, record.Partition, record.Offset, err)
 			}
 			if err := client.CommitRecords(ctx, record); err != nil {
 				return fmt.Errorf("committing Kafka record at %s/%d/%d: %w", record.Topic, record.Partition, record.Offset, err)
+			}
+			if !handled {
+				logger.Debug("transaction event ignored", "event_id", envelope.EventID(), "event_type", envelope.EventType())
+				continue
 			}
 			logger.Info("transaction event processed", "event_id", envelope.EventID(), "transfer_id", envelope.AggregateID())
 		}
@@ -124,19 +161,46 @@ func consume(ctx context.Context, client *kgo.Client, handler *Handler, logger *
 
 func handleRecord(
 	ctx context.Context,
-	handler interface {
-		Handle(context.Context, event.Envelope) error
-	},
+	handler eventHandler,
 	value []byte,
-) (event.Envelope, error) {
+) (event.Envelope, bool, error) {
 	envelope, err := event.ParseEnvelope(value)
 	if err != nil {
-		return event.Envelope{}, fmt.Errorf("parsing Kafka event: %w", err)
+		return event.Envelope{}, false, fmt.Errorf("parsing Kafka event: %w", err)
+	}
+	if !knownEventType(envelope.EventType()) {
+		return envelope, false, fmt.Errorf("%w: %s", errUnsupportedEventType, envelope.EventType())
+	}
+	if envelope.EventType() != transferevents.RiskAssessedType && envelope.EventType() != transferevents.ReviewDecidedType {
+		return envelope, false, nil
 	}
 	if err := handler.Handle(ctx, envelope); err != nil {
-		return event.Envelope{}, fmt.Errorf("handling transaction event: %w", err)
+		return event.Envelope{}, false, fmt.Errorf("handling transaction event: %w", err)
 	}
-	return envelope, nil
+	return envelope, true, nil
+}
+
+func quarantineReason(err error) (string, bool) {
+	if errors.Is(err, event.ErrInvalidEnvelope) {
+		return quarantinepostgres.ReasonInvalidEnvelope, true
+	}
+	if errors.Is(err, errUnsupportedEventType) {
+		return quarantinepostgres.ReasonUnsupportedEventType, true
+	}
+	return "", false
+}
+
+func knownEventType(eventType string) bool {
+	switch eventType {
+	case transferevents.RequestedType,
+		transferevents.RiskAssessedType,
+		transferevents.ReviewDecidedType,
+		transferevents.CompletedType,
+		transferevents.FailedType:
+		return true
+	default:
+		return false
+	}
 }
 
 func splitNonempty(value string) []string {
